@@ -109,3 +109,6 @@ The bot uses the official Predict API endpoints:
 
 Market parsing relies on `title/question/outcomes` to detect symbol, timeframe,
 strike, and expiry. If your markets format differs, adjust `market_parser.py`.
+
+Pagination uses the `first` + `after` query params from the API docs. You can
+adjust `PREDICTFUN_MAX_PAGES` and `PREDICTFUN_MARKETS_PAGE_SIZE` in `.env`.

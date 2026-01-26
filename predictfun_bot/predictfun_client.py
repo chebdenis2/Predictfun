@@ -92,8 +92,14 @@ class PredictFunClient:
     def _format_path(template: str, market_id: str) -> str:
         return template.format(id=market_id)
 
-    def list_markets(self, cursor: str | None = None) -> tuple[list[dict], str | None]:
-        params = {"cursor": cursor} if cursor else None
+    def list_markets(self, after: str | None = None, first: int | None = None) -> tuple[list[dict], str | None]:
+        params: dict[str, str] = {}
+        if after:
+            params["after"] = str(after)
+        if first:
+            params["first"] = str(first)
+        if not params:
+            params = None
         payload = self._request_json("GET", self._markets_path, params=params)
         if not isinstance(payload, dict):
             raise RuntimeError(f"Unexpected markets payload: {payload}")
@@ -105,11 +111,11 @@ class PredictFunClient:
             raise RuntimeError(f"Unexpected markets data: {payload}")
         return data, cursor
 
-    def get_all_markets(self, max_pages: int = 3) -> list[dict]:
+    def get_all_markets(self, max_pages: int = 3, page_size: int | None = None) -> list[dict]:
         markets: list[dict] = []
         cursor = None
         for _ in range(max_pages):
-            data, cursor = self.list_markets(cursor)
+            data, cursor = self.list_markets(cursor, page_size)
             markets.extend(data)
             if not cursor:
                 break

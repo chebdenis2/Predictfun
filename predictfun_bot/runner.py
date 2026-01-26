@@ -70,7 +70,10 @@ class Runner:
 
     def _load_markets(self) -> list[Market]:
         try:
-            raw_markets = self._predictfun.get_all_markets(self._config.predictfun_max_pages)
+            raw_markets = self._predictfun.get_all_markets(
+                self._config.predictfun_max_pages,
+                self._config.predictfun_markets_page_size,
+            )
         except Exception as exc:  # noqa: BLE001
             self._logger.log_error("list_markets", str(exc))
             return []
