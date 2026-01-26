@@ -80,3 +80,9 @@ class TradeLogger:
 
     def log_error(self, context: str, message: str) -> None:
         self._write({"event": "ERROR", "context": context, "message": message})
+
+    def log_info(self, context: str, payload: dict | None = None) -> None:
+        data = {"event": "INFO", "context": context}
+        if payload:
+            data["data"] = payload
+        self._write(data)

@@ -29,6 +29,9 @@ class ApprovalManager:
         print(preview)
 
     def await_approval(self, trade_id: str, poll_interval_sec: int = 5) -> bool:
+        if self._mode == "auto":
+            self._state.mark_approval_seen(trade_id)
+            return True
         if self._mode == "interactive":
             while True:
                 response = input(f"Type 'approve {trade_id}' to execute: ").strip()

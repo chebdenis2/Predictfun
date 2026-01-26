@@ -52,6 +52,11 @@ Approve by writing to `~/clawd-approvals.txt`:
 approve a1b2c3d4
 ```
 
+To trade fully automatically, set:
+```
+APPROVAL_MODE=auto
+```
+
 ## Authentication
 
 Predict.fun requires an **API key** on mainnet and a **JWT token** for any
@@ -81,6 +86,11 @@ python -m predictfun_bot candidates  # print top 3 candidates
 
 Trades are logged as JSON lines to `~/clawd-trades.log`. Daily P&L summaries
 are appended to `~/clawd-pnl.log` (UTC).
+
+Enable verbose runtime logs with:
+```
+VERBOSE_LOGS=true
+```
 
 ## Pricing model (orderbook)
 

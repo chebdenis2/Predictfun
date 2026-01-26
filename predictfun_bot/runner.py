@@ -68,6 +68,15 @@ class Runner:
         print(f"Daily P&L report: {report}")
         self._state.set_last_report_date(date_str)
 
+    def _log_info(self, context: str, payload: dict | None = None) -> None:
+        if not self._config.verbose_logs:
+            return
+        self._logger.log_info(context, payload)
+        if payload:
+            print(f"[INFO] {context}: {payload}")
+        else:
+            print(f"[INFO] {context}")
+
     def _load_markets(self) -> list[Market]:
         try:
             raw_markets = self._predictfun.get_all_markets(
@@ -78,6 +87,9 @@ class Runner:
             self._logger.log_error("list_markets", str(exc))
             return []
         markets: list[Market] = []
+        total = len(raw_markets)
+        allowed = 0
+        with_orderbook = 0
         for raw in raw_markets:
             if not isinstance(raw, dict):
                 continue
@@ -86,11 +98,13 @@ class Runner:
                 continue
             if not self._strategy.is_allowed_market(base):
                 continue
+            allowed += 1
             try:
                 orderbook = self._predictfun.get_orderbook(base.market_id)
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("orderbook", f"{base.market_id}: {exc}")
                 continue
+            with_orderbook += 1
             try:
                 stats = self._predictfun.get_market_stats(base.market_id)
             except Exception as exc:  # noqa: BLE001
@@ -99,6 +113,10 @@ class Runner:
             market = apply_orderbook(base, orderbook)
             market = apply_stats(market, stats)
             markets.append(market)
+        self._log_info(
+            "markets_loaded",
+            {"total": total, "allowed": allowed, "with_orderbook": with_orderbook},
+        )
         return markets
 
     def _handle_exits(self, markets_by_id: dict[str, Market]) -> None:
@@ -176,6 +194,7 @@ class Runner:
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("binance_spot", str(exc))
         candidates = self._strategy.find_candidates(markets, momentum_probabilities, spot_prices)
+        self._log_info("candidates_evaluated", {"count": len(candidates)})
         if not candidates:
             return
         for candidate in candidates:
@@ -262,6 +281,10 @@ class Runner:
                 self._logger.log_error("place_order", str(exc))
 
     def run_once(self) -> None:
+        self._log_info(
+            "loop_start",
+            {"open_positions": len(self._state.get_open_positions()), "budget": self._config.budget_total_usd},
+        )
         markets = self._load_markets()
         if not markets:
             self._maybe_report_pnl()
@@ -270,6 +293,7 @@ class Runner:
         self._handle_exits(markets_by_id)
         self._handle_entries(markets)
         self._maybe_report_pnl()
+        self._log_info("loop_end", {"open_positions": len(self._state.get_open_positions())})
 
     def get_candidates(self, top_n: int) -> list:
         markets = self._load_markets()
