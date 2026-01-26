@@ -115,6 +115,7 @@ class Runner:
         total = len(raw_markets)
         allowed = 0
         with_orderbook = 0
+        rejected_not_allowed = 0
         spreads = []
         orderbook_latencies = []
         stats_latencies = []
@@ -125,6 +126,19 @@ class Runner:
             if not base.market_id:
                 continue
             if not self._strategy.is_allowed_market(base):
+                rejected_not_allowed += 1
+                if self._config.log_rejections:
+                    self._logger.log_reject(
+                        base.market_id,
+                        base.title,
+                        "not_allowed",
+                        {
+                            "status": base.status,
+                            "kind": base.kind,
+                            "symbol": base.symbol,
+                            "resolution": base.resolution_minutes,
+                        },
+                    )
                 continue
             allowed += 1
             try:
@@ -153,6 +167,7 @@ class Runner:
                 "total": total,
                 "allowed": allowed,
                 "with_orderbook": with_orderbook,
+                "rejected_not_allowed": rejected_not_allowed,
                 "markets_latency_ms": round(markets_latency_ms, 2),
                 "orderbook_ms_avg": round(sum(orderbook_latencies) / len(orderbook_latencies), 2)
                 if orderbook_latencies

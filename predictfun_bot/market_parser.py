@@ -9,6 +9,8 @@ from .models import Market, Outcome
 _SYMBOLS = {
     "BTC": "BTCUSDT",
     "ETH": "ETHUSDT",
+    "BITCOIN": "BTCUSDT",
+    "ETHEREUM": "ETHUSDT",
 }
 
 
