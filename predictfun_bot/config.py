@@ -73,6 +73,8 @@ class Config:
     predictfun_auth_path: str
     predictfun_max_pages: int
     predictfun_markets_page_size: int
+    predictfun_page_sleep_sec: float
+    predictfun_max_page_errors: int
     predictfun_timeout_sec: int
     predictfun_api_key: str | None
     predictfun_api_key_header: str
@@ -143,6 +145,8 @@ def load_config() -> Config:
         predictfun_auth_path=_get_env_str("PREDICTFUN_AUTH_PATH", "/v1/auth"),
         predictfun_max_pages=_get_env_int("PREDICTFUN_MAX_PAGES", 5),
         predictfun_markets_page_size=_get_env_int("PREDICTFUN_MARKETS_PAGE_SIZE", 50),
+        predictfun_page_sleep_sec=_get_env_float("PREDICTFUN_PAGE_SLEEP_SEC", 0.35),
+        predictfun_max_page_errors=_get_env_int("PREDICTFUN_MAX_PAGE_ERRORS", 2),
         predictfun_timeout_sec=_get_env_int("PREDICTFUN_TIMEOUT_SEC", 10),
         predictfun_api_key=_get_env_optional("PREDICTFUN_API_KEY"),
         predictfun_api_key_header=_get_env_str("PREDICTFUN_API_KEY_HEADER", "x-api-key"),

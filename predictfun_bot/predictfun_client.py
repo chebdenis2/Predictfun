@@ -4,6 +4,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import time
 
 
 class PredictFunClient:
@@ -81,6 +82,13 @@ class PredictFunClient:
         try:
             with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
                 raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8")
+            except Exception:  # noqa: BLE001
+                body = ""
+            raise RuntimeError(f"Predict.fun request failed: HTTP {exc.code}: {body}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Predict.fun request failed: {exc}") from exc
         try:
@@ -111,14 +119,32 @@ class PredictFunClient:
             raise RuntimeError(f"Unexpected markets data: {payload}")
         return data, cursor
 
-    def get_all_markets(self, max_pages: int = 3, page_size: int | None = None) -> list[dict]:
+    def get_all_markets(
+        self,
+        max_pages: int = 3,
+        page_size: int | None = None,
+        sleep_sec: float = 0.0,
+        max_errors: int = 0,
+    ) -> list[dict]:
         markets: list[dict] = []
         cursor = None
+        errors = 0
         for _ in range(max_pages):
-            data, cursor = self.list_markets(cursor, page_size)
-            markets.extend(data)
-            if not cursor:
-                break
+            try:
+                data, cursor = self.list_markets(cursor, page_size)
+                markets.extend(data)
+                if not cursor:
+                    break
+                if sleep_sec > 0:
+                    time.sleep(sleep_sec)
+            except RuntimeError as exc:
+                errors += 1
+                if "HTTP 403" in str(exc) or "HTTP 429" in str(exc):
+                    break
+                if max_errors and errors >= max_errors:
+                    break
+                if sleep_sec > 0:
+                    time.sleep(sleep_sec)
         return markets
 
     def get_orderbook(self, market_id: str) -> dict:

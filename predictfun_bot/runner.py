@@ -106,6 +106,8 @@ class Runner:
             raw_markets = self._predictfun.get_all_markets(
                 self._config.predictfun_max_pages,
                 self._config.predictfun_markets_page_size,
+                self._config.predictfun_page_sleep_sec,
+                self._config.predictfun_max_page_errors,
             )
             markets_latency_ms = (time.monotonic() - start) * 1000
         except Exception as exc:  # noqa: BLE001

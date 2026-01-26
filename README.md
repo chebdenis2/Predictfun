@@ -133,3 +133,6 @@ strike, and expiry. If your markets format differs, adjust `market_parser.py`.
 
 Pagination uses the `first` + `after` query params from the API docs. You can
 adjust `PREDICTFUN_MAX_PAGES` and `PREDICTFUN_MARKETS_PAGE_SIZE` in `.env`.
+
+To avoid rate limits, the bot can sleep between pages (`PREDICTFUN_PAGE_SLEEP_SEC`)
+and will stop pagination after repeated errors (`PREDICTFUN_MAX_PAGE_ERRORS`).
