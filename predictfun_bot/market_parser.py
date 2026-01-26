@@ -100,14 +100,14 @@ def _parse_outcomes(raw: object) -> tuple[Outcome, ...]:
 def _parse_symbol(*texts: str) -> str:
     combined = " ".join(texts).upper()
     for key, symbol in _SYMBOLS.items():
-        if re.search(rf"\\b{re.escape(key)}\\b", combined):
+        if re.search(rf"\b{re.escape(key)}\b", combined):
             return symbol
     return ""
 
 
 def _parse_resolution_minutes(*texts: str) -> int:
     combined = " ".join(texts).lower()
-    match = re.search(r"(\\d{1,3})\\s*(?:-?\\s*)(?:min|mins|minute|minutes|m)\\b", combined)
+    match = re.search(r"(\d{1,3})\s*(?:-?\s*)(?:min|mins|minute|minutes|m)\b", combined)
     if match:
         return int(match.group(1))
     return 0
@@ -116,7 +116,7 @@ def _parse_resolution_minutes(*texts: str) -> int:
 def _parse_strike_price(*texts: str) -> float | None:
     combined = " ".join(texts)
     candidates = []
-    for match in re.finditer(r"\\$?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+(?:\\.[0-9]+)?)", combined):
+    for match in re.finditer(r"\$?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+(?:\.[0-9]+)?)", combined):
         raw = match.group(1).replace(",", "")
         try:
             value = float(raw)
@@ -132,8 +132,8 @@ def _parse_strike_price(*texts: str) -> float | None:
 def _parse_expiry_ts(*texts: str) -> int:
     combined = " ".join(texts)
     patterns = [
-        r"(\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(?::\\d{2})?\\s*UTC)",
-        r"([A-Za-z]{3,9}\\s+\\d{1,2},\\s+\\d{4}\\s+\\d{2}:\\d{2}\\s*UTC)",
+        r"(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?\s*UTC)",
+        r"([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}\s+\d{2}:\d{2}\s*UTC)",
     ]
     formats = [
         "%Y-%m-%d %H:%M UTC",
