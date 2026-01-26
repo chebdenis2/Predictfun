@@ -7,11 +7,18 @@ markets. Trades are executed only after explicit approval.
 ## Strategy interpretation
 
 The bot treats "implied odds" as the Predict.fun YES price (probability). It
-derives a model probability from Binance spot momentum:
+derives a model probability from Binance spot momentum and (optionally) the
+distance between spot and the market strike:
 
 ```
 return_lookback = (close_now / close_prev) - 1
-p_model = clamp(0.5 + k * return_lookback, 0, 1)
+p_mom = clamp(0.5 + k * return_lookback, 0, 1)
+
+spot_diff = (spot - strike) / strike
+p_spot = clamp(0.5 + spot_sensitivity * spot_diff, 0, 1)
+
+p_model = w_spot * p_spot + (1 - w_spot) * p_mom
+(if strike is unavailable, p_model = p_mom)
 ```
 
 If `p_model - p_market >= 0.04` the bot proposes a YES trade. If

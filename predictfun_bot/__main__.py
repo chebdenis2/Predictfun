@@ -52,16 +52,22 @@ def _print_top_candidates(top_n: int) -> None:
     )
     strategy = Strategy(config)
     markets = client.list_markets()
-    up_probabilities = {}
+    momentum_probabilities = {}
+    spot_prices = {}
     for symbol in config.allowed_symbols:
-        up_probabilities[symbol] = binance.estimate_up_probability(
+        momentum_probabilities[symbol] = binance.estimate_up_probability(
             symbol,
             config.binance_base_url,
             config.binance_timeout_sec,
             config.model_lookback_minutes,
             config.model_k,
         )
-    candidates = strategy.find_candidates(markets, up_probabilities)
+        spot_prices[symbol] = binance.get_spot_price(
+            symbol,
+            config.binance_base_url,
+            config.binance_timeout_sec,
+        )
+    candidates = strategy.find_candidates(markets, momentum_probabilities, spot_prices)
     if not candidates:
         print("No candidates.")
         return

@@ -14,6 +14,7 @@ class Market:
     expiry_ts: int
     resolution_minutes: int
     kind: str
+    strike_price: float | None
 
 
 @dataclass(frozen=True)

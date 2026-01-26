@@ -11,6 +11,35 @@ class Strategy:
     def __init__(self, config: Config) -> None:
         self._config = config
 
+    @staticmethod
+    def _clamp(value: float) -> float:
+        if value < 0.0:
+            return 0.0
+        if value > 1.0:
+            return 1.0
+        return value
+
+    def _spot_probability(self, spot: float, strike: float) -> float:
+        if strike <= 0:
+            return 0.5
+        diff = (spot - strike) / strike
+        raw = 0.5 + (self._config.spot_sensitivity * diff)
+        return self._clamp(raw)
+
+    def _blend_probability(self, momentum: float | None, spot: float | None) -> float | None:
+        if momentum is None and spot is None:
+            return None
+        if spot is None:
+            return momentum
+        if momentum is None:
+            return spot
+        weight = self._config.spot_weight
+        if weight < 0.0:
+            weight = 0.0
+        if weight > 1.0:
+            weight = 1.0
+        return self._clamp((weight * spot) + ((1.0 - weight) * momentum))
+
     def _is_allowed_market(self, market: Market) -> bool:
         if market.symbol not in self._config.allowed_symbols:
             return False
@@ -23,7 +52,8 @@ class Strategy:
     def find_candidates(
         self,
         markets: list[Market],
-        up_probability_by_symbol: dict[str, float],
+        momentum_probability_by_symbol: dict[str, float],
+        spot_by_symbol: dict[str, float],
         now_ts: int | None = None,
     ) -> list[TradeCandidate]:
         now_ts = now_ts or int(time.time())
@@ -38,7 +68,12 @@ class Strategy:
                 continue
             if market.volume_usd < self._config.min_volume_usd:
                 continue
-            p_model = up_probability_by_symbol.get(market.symbol)
+            p_momentum = momentum_probability_by_symbol.get(market.symbol)
+            spot_price = spot_by_symbol.get(market.symbol)
+            p_spot = None
+            if spot_price is not None and market.strike_price is not None:
+                p_spot = self._spot_probability(spot_price, market.strike_price)
+            p_model = self._blend_probability(p_momentum, p_spot)
             if p_model is None:
                 continue
             p_market = market.yes_price

@@ -128,9 +128,34 @@ class PredictFunClient:
                     expiry_ts=_parse_ts(_pick(item, ("expiry_ts", "expires_at", "expiry", "expiryTs"), 0)),
                     resolution_minutes=int(_pick(item, ("resolution_minutes", "resolutionMinutes"), 15)),
                     kind=str(_pick(item, ("kind", "type"), "UPDOWN")),
+                    strike_price=_parse_strike(item),
                 )
             )
         return markets
+
+
+def _parse_strike(item: dict) -> float | None:
+    value = _pick(
+        item,
+        (
+            "strike_price",
+            "strikePrice",
+            "target_price",
+            "targetPrice",
+            "threshold",
+            "start_price",
+            "startPrice",
+            "initial_price",
+            "initialPrice",
+        ),
+        None,
+    )
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
     def get_balance(self) -> object:
         url = self._build_url(self._balance_path)

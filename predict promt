@@ -6,7 +6,9 @@
 - Только рынки: BTC/ETH 15-min Up/Down, или короткие события с экспирацией <24 ч.
 - Стратегия:
   - Implied odds = цена YES (вероятность 0..1).
-  - p_model = clamp(0.5 + k * return_5m), где return_5m = (close_now/close_prev - 1).
+  - p_mom = clamp(0.5 + k * return_5m), где return_5m = (close_now/close_prev - 1).
+  - p_spot = clamp(0.5 + s * (spot - strike) / strike), если strike известен.
+  - p_model = w_spot * p_spot + (1 - w_spot) * p_mom.
   - Входи в YES, если p_model выше implied odds на >4% и объём >$50k.
   - Входи в NO, если implied odds выше p_model на >4%.
   - Выход: при достижении +30% прибыли или -15% убытка, или за 5 мин до экспирации.

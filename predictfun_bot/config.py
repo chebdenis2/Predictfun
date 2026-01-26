@@ -85,6 +85,8 @@ class Config:
     dry_run: bool
     model_k: float
     model_lookback_minutes: int
+    spot_weight: float
+    spot_sensitivity: float
     allowed_symbols: tuple[str, ...]
     allowed_resolution_minutes: tuple[int, ...]
     allowed_kinds: tuple[str, ...]
@@ -130,6 +132,8 @@ def load_config() -> Config:
         dry_run=_get_env_bool("DRY_RUN", True),
         model_k=_get_env_float("MODEL_K", 10.0),
         model_lookback_minutes=_get_env_int("MODEL_LOOKBACK_MINUTES", 5),
+        spot_weight=_get_env_float("SPOT_WEIGHT", 0.6),
+        spot_sensitivity=_get_env_float("SPOT_SENSITIVITY", 10.0),
         allowed_symbols=_parse_csv(symbols_csv),
         allowed_resolution_minutes=tuple(int(x) for x in _parse_csv(resolutions_csv)),
         allowed_kinds=_parse_csv(kinds_csv),

@@ -118,10 +118,11 @@ class Runner:
     def _handle_entries(self, markets: list[Market]) -> None:
         if len(self._state.get_open_positions()) >= self._config.max_open_positions:
             return
-        up_probabilities: dict[str, float] = {}
+        momentum_probabilities: dict[str, float] = {}
+        spot_prices: dict[str, float] = {}
         for symbol in self._config.allowed_symbols:
             try:
-                up_probabilities[symbol] = binance.estimate_up_probability(
+                momentum_probabilities[symbol] = binance.estimate_up_probability(
                     symbol,
                     self._config.binance_base_url,
                     self._config.binance_timeout_sec,
@@ -130,7 +131,15 @@ class Runner:
                 )
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("binance_probability", str(exc))
-        candidates = self._strategy.find_candidates(markets, up_probabilities)
+            try:
+                spot_prices[symbol] = binance.get_spot_price(
+                    symbol,
+                    self._config.binance_base_url,
+                    self._config.binance_timeout_sec,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._logger.log_error("binance_spot", str(exc))
+        candidates = self._strategy.find_candidates(markets, momentum_probabilities, spot_prices)
         if not candidates:
             return
         for candidate in candidates:
