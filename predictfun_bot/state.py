@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Iterable
 
 from .models import Position
 
@@ -10,7 +9,12 @@ from .models import Position
 class StateStore:
     def __init__(self, path: str) -> None:
         self._path = path
-        self._state: dict = {"open_positions": {}, "seen_approvals": [], "last_report_date": None}
+        self._state: dict = {
+            "open_positions": {},
+            "seen_approvals": [],
+            "last_report_date": None,
+            "auth_jwt": None,
+        }
         self._load()
 
     def _load(self) -> None:
@@ -20,7 +24,12 @@ class StateStore:
             with open(self._path, "r", encoding="utf-8") as handle:
                 self._state = json.load(handle)
         except (OSError, json.JSONDecodeError):
-            self._state = {"open_positions": {}, "seen_approvals": [], "last_report_date": None}
+            self._state = {
+                "open_positions": {},
+                "seen_approvals": [],
+                "last_report_date": None,
+                "auth_jwt": None,
+            }
 
     def _save(self) -> None:
         directory = os.path.dirname(self._path)
@@ -39,10 +48,16 @@ class StateStore:
                     market_id=item["market_id"],
                     symbol=item["symbol"],
                     side=item["side"],
+                    token_id=item.get("token_id", ""),
+                    quantity_wei=int(item.get("quantity_wei", 0)),
                     size_usd=float(item["size_usd"]),
                     entry_price=float(item["entry_price"]),
                     opened_at_ts=int(item["opened_at_ts"]),
                     expiry_ts=int(item["expiry_ts"]),
+                    fee_rate_bps=int(item.get("fee_rate_bps", 0)),
+                    is_neg_risk=bool(item.get("is_neg_risk", False)),
+                    is_yield_bearing=bool(item.get("is_yield_bearing", False)),
+                    decimal_precision=int(item.get("decimal_precision", 2)),
                 )
             )
         return positions
@@ -53,10 +68,16 @@ class StateStore:
             "market_id": position.market_id,
             "symbol": position.symbol,
             "side": position.side,
+            "token_id": position.token_id,
+            "quantity_wei": position.quantity_wei,
             "size_usd": position.size_usd,
             "entry_price": position.entry_price,
             "opened_at_ts": position.opened_at_ts,
             "expiry_ts": position.expiry_ts,
+            "fee_rate_bps": position.fee_rate_bps,
+            "is_neg_risk": position.is_neg_risk,
+            "is_yield_bearing": position.is_yield_bearing,
+            "decimal_precision": position.decimal_precision,
         }
         self._save()
 
@@ -79,4 +100,11 @@ class StateStore:
 
     def set_last_report_date(self, date_str: str) -> None:
         self._state["last_report_date"] = date_str
+        self._save()
+
+    def get_auth_jwt(self) -> str | None:
+        return self._state.get("auth_jwt")
+
+    def set_auth_jwt(self, token: str | None) -> None:
+        self._state["auth_jwt"] = token
         self._save()

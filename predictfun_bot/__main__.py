@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 
-from . import binance
 from .approvals import ApprovalManager
+from .auth import AuthManager
 from .config import load_config
+from .order_service import OrderService
 from .pnl import append_daily_report
 from .predictfun_client import PredictFunClient
 from .runner import Runner
@@ -21,53 +22,28 @@ def _build_runner() -> Runner:
         config.predictfun_orders_path,
         config.predictfun_positions_path,
         config.predictfun_balance_path,
+        config.predictfun_orderbook_path,
+        config.predictfun_stats_path,
+        config.predictfun_auth_message_path,
+        config.predictfun_auth_path,
         config.predictfun_timeout_sec,
         config.predictfun_api_key,
-        config.predictfun_api_secret,
+        config.predictfun_api_key_header,
         config.predictfun_auth_header,
-        config.predictfun_auth_prefix,
-        config.predictfun_secret_header,
+        config.predictfun_jwt,
     )
     state = StateStore(config.state_path)
+    auth = AuthManager(config, client, state)
     approvals = ApprovalManager(config.approval_mode, config.approval_file_path, state)
     logger = TradeLogger(config.trade_log_path)
     strategy = Strategy(config)
-    return Runner(config, client, approvals, state, logger, strategy)
+    orders = OrderService(config)
+    return Runner(config, client, auth, approvals, state, logger, strategy, orders)
 
 
 def _print_top_candidates(top_n: int) -> None:
-    config = load_config()
-    client = PredictFunClient(
-        config.predictfun_base_url,
-        config.predictfun_markets_path,
-        config.predictfun_orders_path,
-        config.predictfun_positions_path,
-        config.predictfun_balance_path,
-        config.predictfun_timeout_sec,
-        config.predictfun_api_key,
-        config.predictfun_api_secret,
-        config.predictfun_auth_header,
-        config.predictfun_auth_prefix,
-        config.predictfun_secret_header,
-    )
-    strategy = Strategy(config)
-    markets = client.list_markets()
-    momentum_probabilities = {}
-    spot_prices = {}
-    for symbol in config.allowed_symbols:
-        momentum_probabilities[symbol] = binance.estimate_up_probability(
-            symbol,
-            config.binance_base_url,
-            config.binance_timeout_sec,
-            config.model_lookback_minutes,
-            config.model_k,
-        )
-        spot_prices[symbol] = binance.get_spot_price(
-            symbol,
-            config.binance_base_url,
-            config.binance_timeout_sec,
-        )
-    candidates = strategy.find_candidates(markets, momentum_probabilities, spot_prices)
+    runner = _build_runner()
+    candidates = runner.get_candidates(top_n)
     if not candidates:
         print("No candidates.")
         return

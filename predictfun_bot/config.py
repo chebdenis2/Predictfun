@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Iterable
 
 
 def _get_env_float(name: str, default: float) -> float:
@@ -68,12 +67,22 @@ class Config:
     predictfun_orders_path: str
     predictfun_positions_path: str
     predictfun_balance_path: str
+    predictfun_orderbook_path: str
+    predictfun_stats_path: str
+    predictfun_auth_message_path: str
+    predictfun_auth_path: str
+    predictfun_max_pages: int
     predictfun_timeout_sec: int
     predictfun_api_key: str | None
-    predictfun_api_secret: str | None
+    predictfun_api_key_header: str
+    predictfun_jwt: str | None
     predictfun_auth_header: str
-    predictfun_auth_prefix: str
-    predictfun_secret_header: str
+    predictfun_auth_mode: str
+    predictfun_wallet_private_key: str | None
+    predictfun_privy_wallet_private_key: str | None
+    predictfun_predict_account_address: str | None
+    predictfun_chain_id: int
+    predictfun_set_approvals: bool
     approval_mode: str
     approval_file_path: str
     state_path: str
@@ -83,6 +92,7 @@ class Config:
     pnl_report_minute_utc: int
     poll_interval_sec: int
     dry_run: bool
+    order_expiry_minutes: int
     model_k: float
     model_lookback_minutes: int
     spot_weight: float
@@ -90,12 +100,14 @@ class Config:
     allowed_symbols: tuple[str, ...]
     allowed_resolution_minutes: tuple[int, ...]
     allowed_kinds: tuple[str, ...]
+    allowed_statuses: tuple[str, ...]
 
 
 def load_config() -> Config:
     symbols_csv = _get_env_str("ALLOWED_SYMBOLS", "BTCUSDT,ETHUSDT")
     resolutions_csv = _get_env_str("ALLOWED_RESOLUTIONS", "15")
     kinds_csv = _get_env_str("ALLOWED_KINDS", "UPDOWN")
+    statuses_csv = _get_env_str("ALLOWED_STATUSES", "UNPAUSED,PRICE_PROPOSED")
     return Config(
         budget_total_usd=_get_env_float("BUDGET_TOTAL_USD", 50.0),
         position_size_min_pct=_get_env_float("POSITION_SIZE_MIN_PCT", 0.10),
@@ -110,17 +122,31 @@ def load_config() -> Config:
         min_time_to_expiry_minutes=_get_env_int("MIN_TIME_TO_EXPIRY_MINUTES", 1),
         binance_base_url=_get_env_str("BINANCE_BASE_URL", "https://api.binance.com"),
         binance_timeout_sec=_get_env_int("BINANCE_TIMEOUT_SEC", 10),
-        predictfun_base_url=_get_env_str("PREDICTFUN_BASE_URL", ""),
-        predictfun_markets_path=_get_env_str("PREDICTFUN_MARKETS_PATH", "/markets"),
-        predictfun_orders_path=_get_env_str("PREDICTFUN_ORDERS_PATH", "/orders"),
-        predictfun_positions_path=_get_env_str("PREDICTFUN_POSITIONS_PATH", "/positions"),
-        predictfun_balance_path=_get_env_str("PREDICTFUN_BALANCE_PATH", "/balance"),
+        predictfun_base_url=_get_env_str("PREDICTFUN_BASE_URL", "https://api.predict.fun"),
+        predictfun_markets_path=_get_env_str("PREDICTFUN_MARKETS_PATH", "/v1/markets"),
+        predictfun_orders_path=_get_env_str("PREDICTFUN_ORDERS_PATH", "/v1/orders"),
+        predictfun_positions_path=_get_env_str("PREDICTFUN_POSITIONS_PATH", "/v1/positions"),
+        predictfun_balance_path=_get_env_str("PREDICTFUN_BALANCE_PATH", "/v1/account"),
+        predictfun_orderbook_path=_get_env_str(
+            "PREDICTFUN_ORDERBOOK_PATH", "/v1/markets/{id}/orderbook"
+        ),
+        predictfun_stats_path=_get_env_str("PREDICTFUN_STATS_PATH", "/v1/markets/{id}/stats"),
+        predictfun_auth_message_path=_get_env_str(
+            "PREDICTFUN_AUTH_MESSAGE_PATH", "/v1/auth/message"
+        ),
+        predictfun_auth_path=_get_env_str("PREDICTFUN_AUTH_PATH", "/v1/auth"),
+        predictfun_max_pages=_get_env_int("PREDICTFUN_MAX_PAGES", 5),
         predictfun_timeout_sec=_get_env_int("PREDICTFUN_TIMEOUT_SEC", 10),
         predictfun_api_key=_get_env_optional("PREDICTFUN_API_KEY"),
-        predictfun_api_secret=_get_env_optional("PREDICTFUN_API_SECRET"),
+        predictfun_api_key_header=_get_env_str("PREDICTFUN_API_KEY_HEADER", "x-api-key"),
+        predictfun_jwt=_get_env_optional("PREDICTFUN_JWT"),
         predictfun_auth_header=_get_env_str("PREDICTFUN_AUTH_HEADER", "Authorization"),
-        predictfun_auth_prefix=_get_env_str("PREDICTFUN_AUTH_PREFIX", "Bearer"),
-        predictfun_secret_header=_get_env_str("PREDICTFUN_SECRET_HEADER", "X-API-SECRET"),
+        predictfun_auth_mode=_get_env_str("PREDICTFUN_AUTH_MODE", "predict"),
+        predictfun_wallet_private_key=_get_env_optional("PREDICTFUN_WALLET_PRIVATE_KEY"),
+        predictfun_privy_wallet_private_key=_get_env_optional("PREDICTFUN_PRIVY_WALLET_PRIVATE_KEY"),
+        predictfun_predict_account_address=_get_env_optional("PREDICTFUN_PREDICT_ACCOUNT_ADDRESS"),
+        predictfun_chain_id=_get_env_int("PREDICTFUN_CHAIN_ID", 56),
+        predictfun_set_approvals=_get_env_bool("PREDICTFUN_SET_APPROVALS", False),
         approval_mode=_get_env_str("APPROVAL_MODE", "file"),
         approval_file_path=_expand(_get_env_str("APPROVAL_FILE_PATH", "~/clawd-approvals.txt")),
         state_path=_expand(_get_env_str("STATE_PATH", "~/.clawd-state.json")),
@@ -130,6 +156,7 @@ def load_config() -> Config:
         pnl_report_minute_utc=_get_env_int("PNL_REPORT_MINUTE_UTC", 0),
         poll_interval_sec=_get_env_int("POLL_INTERVAL_SEC", 15),
         dry_run=_get_env_bool("DRY_RUN", True),
+        order_expiry_minutes=_get_env_int("ORDER_EXPIRY_MINUTES", 10),
         model_k=_get_env_float("MODEL_K", 10.0),
         model_lookback_minutes=_get_env_int("MODEL_LOOKBACK_MINUTES", 5),
         spot_weight=_get_env_float("SPOT_WEIGHT", 0.6),
@@ -137,4 +164,5 @@ def load_config() -> Config:
         allowed_symbols=_parse_csv(symbols_csv),
         allowed_resolution_minutes=tuple(int(x) for x in _parse_csv(resolutions_csv)),
         allowed_kinds=_parse_csv(kinds_csv),
+        allowed_statuses=_parse_csv(statuses_csv),
     )

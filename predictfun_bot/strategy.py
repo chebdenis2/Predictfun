@@ -40,12 +40,14 @@ class Strategy:
             weight = 1.0
         return self._clamp((weight * spot) + ((1.0 - weight) * momentum))
 
-    def _is_allowed_market(self, market: Market) -> bool:
-        if market.symbol not in self._config.allowed_symbols:
+    def is_allowed_market(self, market: Market) -> bool:
+        if not market.symbol or market.symbol not in self._config.allowed_symbols:
             return False
-        if market.resolution_minutes not in self._config.allowed_resolution_minutes:
+        if market.resolution_minutes and market.resolution_minutes not in self._config.allowed_resolution_minutes:
             return False
-        if market.kind not in self._config.allowed_kinds:
+        if market.kind and market.kind not in self._config.allowed_kinds:
+            return False
+        if market.status and market.status not in self._config.allowed_statuses:
             return False
         return True
 
@@ -59,13 +61,14 @@ class Strategy:
         now_ts = now_ts or int(time.time())
         candidates: list[TradeCandidate] = []
         for market in markets:
-            if not self._is_allowed_market(market):
+            if not self.is_allowed_market(market):
                 continue
-            minutes_to_expiry = (market.expiry_ts - now_ts) / 60 if market.expiry_ts else 0
-            if minutes_to_expiry > self._config.max_time_to_expiry_minutes:
-                continue
-            if minutes_to_expiry < self._config.min_time_to_expiry_minutes:
-                continue
+            if market.expiry_ts:
+                minutes_to_expiry = (market.expiry_ts - now_ts) / 60
+                if minutes_to_expiry > self._config.max_time_to_expiry_minutes:
+                    continue
+                if minutes_to_expiry < self._config.min_time_to_expiry_minutes:
+                    continue
             if market.volume_usd < self._config.min_volume_usd:
                 continue
             p_momentum = momentum_probability_by_symbol.get(market.symbol)
@@ -76,20 +79,25 @@ class Strategy:
             p_model = self._blend_probability(p_momentum, p_spot)
             if p_model is None:
                 continue
-            p_market = market.yes_price
+            if market.yes_ask is None or market.no_ask is None:
+                continue
+            p_market = market.yes_ask
             edge_yes = p_model - p_market
             edge_no = p_market - p_model
             if edge_yes >= self._config.edge_threshold:
                 side = "YES"
-                price = market.yes_price
+                price = market.yes_ask
                 edge = edge_yes
             elif edge_no >= self._config.edge_threshold:
                 side = "NO"
-                price = market.no_price
+                price = market.no_ask
                 edge = edge_no
             else:
                 continue
             if price <= 0:
+                continue
+            token_id = self._pick_token_id(market, side)
+            if not token_id:
                 continue
             expected_roi = edge / price
             trade_id = uuid.uuid4().hex[:8]
@@ -99,6 +107,7 @@ class Strategy:
                     market_id=market.market_id,
                     symbol=market.symbol,
                     side=side,
+                    token_id=token_id,
                     price=price,
                     p_market=p_market,
                     p_model=p_model,
@@ -106,6 +115,10 @@ class Strategy:
                     expected_roi=expected_roi,
                     volume_usd=market.volume_usd,
                     expiry_ts=market.expiry_ts,
+                    fee_rate_bps=market.fee_rate_bps,
+                    is_neg_risk=market.is_neg_risk,
+                    is_yield_bearing=market.is_yield_bearing,
+                    decimal_precision=market.decimal_precision,
                 )
             )
         candidates.sort(key=lambda item: item.edge, reverse=True)
@@ -118,15 +131,24 @@ class Strategy:
         now_ts: int | None = None,
     ) -> tuple[bool, str, float]:
         now_ts = now_ts or int(time.time())
-        minutes_to_expiry = (market.expiry_ts - now_ts) / 60 if market.expiry_ts else 0
-        current_price = market.yes_price if position.side == "YES" else market.no_price
-        if current_price <= 0 or position.entry_price <= 0:
+        minutes_to_expiry = (market.expiry_ts - now_ts) / 60 if market.expiry_ts else None
+        current_price = market.yes_bid if position.side == "YES" else market.no_bid
+        if current_price is None or current_price <= 0 or position.entry_price <= 0:
             return True, "invalid_price", current_price
         roi = (current_price - position.entry_price) / position.entry_price
         if roi >= self._config.take_profit_pct:
             return True, "take_profit", current_price
         if roi <= -self._config.stop_loss_pct:
             return True, "stop_loss", current_price
-        if minutes_to_expiry <= self._config.exit_before_expiry_minutes:
+        if minutes_to_expiry is not None and minutes_to_expiry <= self._config.exit_before_expiry_minutes:
             return True, "expiry", current_price
         return False, "", current_price
+
+    @staticmethod
+    def _pick_token_id(market: Market, side: str) -> str:
+        normalized = side.lower()
+        targets = ("yes", "up") if normalized == "yes" else ("no", "down")
+        for outcome in market.outcomes:
+            if outcome.name.lower() in targets:
+                return outcome.token_id
+        return ""

@@ -27,8 +27,14 @@ apply.
 
 ## Quick start
 
-1. Configure environment variables (see `.env.example`).
-2. Run the bot:
+1. Install dependencies:
+
+```
+python -m pip install -r requirements.txt
+```
+
+2. Configure environment variables (see `.env.example`).
+3. Run the bot:
 
 ```
 python -m predictfun_bot run
@@ -46,6 +52,22 @@ Approve by writing to `~/clawd-approvals.txt`:
 approve a1b2c3d4
 ```
 
+## Authentication
+
+Predict.fun requires an **API key** on mainnet and a **JWT token** for any
+personal operations (orders/positions). The bot can fetch a JWT automatically:
+
+- `PREDICTFUN_AUTH_MODE=predict` (default): uses the **Privy Wallet private key**
+  and the **Predict account (deposit) address** from your profile settings.
+- `PREDICTFUN_AUTH_MODE=eoa`: uses a standard EOA private key.
+- Or provide `PREDICTFUN_JWT` to skip JWT fetching.
+
+The bot signs `/v1/auth/message` and exchanges it for a token via `/v1/auth`,
+following the official developer docs.
+
+If you are on **testnet**, the API key is not required (per docs). For mainnet
+you must set `PREDICTFUN_API_KEY` (header defaults to `x-api-key`).
+
 ## Commands
 
 ```
@@ -60,24 +82,30 @@ python -m predictfun_bot candidates  # print top 3 candidates
 Trades are logged as JSON lines to `~/clawd-trades.log`. Daily P&L summaries
 are appended to `~/clawd-pnl.log` (UTC).
 
-## Predict.fun API mapping
+## Pricing model (orderbook)
 
-The client expects Predict.fun markets to be returned in a normalized JSON
-shape with keys like:
+Predict.fun orderbooks are **YES-side only**. The bot derives NO prices using
+the complement at the market’s decimal precision:
 
 ```
-{
-  "id": "...",
-  "symbol": "BTCUSDT",
-  "title": "...",
-  "yes_price": 0.52,
-  "no_price": 0.48,
-  "volume_usd": 123456,
-  "expiry_ts": 1700000000,
-  "resolution_minutes": 15,
-  "kind": "UPDOWN"
-}
+yes_ask = asks[0][0]
+yes_bid = bids[0][0]
+no_ask = complement(yes_bid)
+no_bid = complement(yes_ask)
 ```
 
-If your API uses different field names, update `predictfun_client.py` to map
-them correctly.
+Entry prices use `yes_ask` for YES and `no_ask` for NO. Exit prices use the
+corresponding bids.
+
+## Predict.fun API usage
+
+The bot uses the official Predict API endpoints:
+
+- `GET /v1/markets`
+- `GET /v1/markets/{id}/orderbook`
+- `GET /v1/markets/{id}/stats`
+- `POST /v1/orders`
+- `GET /v1/positions`
+
+Market parsing relies on `title/question/outcomes` to detect symbol, timeframe,
+strike, and expiry. If your markets format differs, adjust `market_parser.py`.
