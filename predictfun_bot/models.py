@@ -41,9 +41,12 @@ class TradeCandidate:
     side: str
     token_id: str
     price: float
+    spread: float | None
     p_market: float
     p_model: float
     edge: float
+    required_edge: float
+    effective_edge: float
     expected_roi: float
     volume_usd: float
     expiry_ts: int

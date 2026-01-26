@@ -58,71 +58,123 @@ class Strategy:
         spot_by_symbol: dict[str, float],
         now_ts: int | None = None,
     ) -> list[TradeCandidate]:
-        now_ts = now_ts or int(time.time())
         candidates: list[TradeCandidate] = []
+        now_ts = now_ts or int(time.time())
         for market in markets:
-            if not self.is_allowed_market(market):
-                continue
-            if market.expiry_ts:
-                minutes_to_expiry = (market.expiry_ts - now_ts) / 60
-                if minutes_to_expiry > self._config.max_time_to_expiry_minutes:
-                    continue
-                if minutes_to_expiry < self._config.min_time_to_expiry_minutes:
-                    continue
-            if market.volume_usd < self._config.min_volume_usd:
-                continue
-            p_momentum = momentum_probability_by_symbol.get(market.symbol)
-            spot_price = spot_by_symbol.get(market.symbol)
-            p_spot = None
-            if spot_price is not None and market.strike_price is not None:
-                p_spot = self._spot_probability(spot_price, market.strike_price)
-            p_model = self._blend_probability(p_momentum, p_spot)
-            if p_model is None:
-                continue
-            if market.yes_ask is None or market.no_ask is None:
-                continue
-            p_market = market.yes_ask
-            edge_yes = p_model - p_market
-            edge_no = p_market - p_model
-            if edge_yes >= self._config.edge_threshold:
-                side = "YES"
-                price = market.yes_ask
-                edge = edge_yes
-            elif edge_no >= self._config.edge_threshold:
-                side = "NO"
-                price = market.no_ask
-                edge = edge_no
-            else:
-                continue
-            if price <= 0:
-                continue
-            token_id = self._pick_token_id(market, side)
-            if not token_id:
-                continue
-            expected_roi = edge / price
-            trade_id = uuid.uuid4().hex[:8]
-            candidates.append(
-                TradeCandidate(
-                    trade_id=trade_id,
-                    market_id=market.market_id,
-                    symbol=market.symbol,
-                    side=side,
-                    token_id=token_id,
-                    price=price,
-                    p_market=p_market,
-                    p_model=p_model,
-                    edge=edge,
-                    expected_roi=expected_roi,
-                    volume_usd=market.volume_usd,
-                    expiry_ts=market.expiry_ts,
-                    fee_rate_bps=market.fee_rate_bps,
-                    is_neg_risk=market.is_neg_risk,
-                    is_yield_bearing=market.is_yield_bearing,
-                    decimal_precision=market.decimal_precision,
-                )
+            candidate, _, _ = self.evaluate_market(
+                market,
+                momentum_probability_by_symbol,
+                spot_by_symbol,
+                now_ts=now_ts,
             )
+            if candidate:
+                candidates.append(candidate)
         candidates.sort(key=lambda item: item.edge, reverse=True)
         return candidates
+
+    def evaluate_market(
+        self,
+        market: Market,
+        momentum_probability_by_symbol: dict[str, float],
+        spot_by_symbol: dict[str, float],
+        now_ts: int | None = None,
+    ) -> tuple[TradeCandidate | None, str, dict]:
+        now_ts = now_ts or int(time.time())
+        if not self.is_allowed_market(market):
+            return None, "not_allowed", {
+                "status": market.status,
+                "kind": market.kind,
+                "symbol": market.symbol,
+                "resolution": market.resolution_minutes,
+            }
+        if market.expiry_ts:
+            minutes_to_expiry = (market.expiry_ts - now_ts) / 60
+            if minutes_to_expiry > self._config.max_time_to_expiry_minutes:
+                return None, "expiry_too_far", {"minutes": minutes_to_expiry}
+            if minutes_to_expiry < self._config.min_time_to_expiry_minutes:
+                return None, "expiry_too_close", {"minutes": minutes_to_expiry}
+        if market.volume_usd < self._config.min_volume_usd:
+            return None, "low_volume", {"volume_usd": market.volume_usd}
+        if market.yes_ask is None or market.no_ask is None:
+            return None, "missing_orderbook", {}
+        p_momentum = momentum_probability_by_symbol.get(market.symbol)
+        spot_price = spot_by_symbol.get(market.symbol)
+        p_spot = None
+        if spot_price is not None and market.strike_price is not None:
+            p_spot = self._spot_probability(spot_price, market.strike_price)
+        p_model = self._blend_probability(p_momentum, p_spot)
+        if p_model is None:
+            return None, "missing_model", {"momentum": p_momentum, "spot": p_spot}
+        spread = None
+        if market.yes_bid is not None and market.yes_ask is not None:
+            spread = market.yes_ask - market.yes_bid
+            if spread < 0:
+                spread = 0.0
+        if spread is not None and spread > self._config.max_spread:
+            return None, "spread_too_high", {"spread": spread, "max_spread": self._config.max_spread}
+        p_market = market.yes_ask
+        edge_yes = p_model - p_market
+        edge_no = p_market - p_model
+        fee_cost = (market.fee_rate_bps / 10000.0) * self._config.fee_edge_multiplier
+        required_edge = self._config.edge_threshold + fee_cost
+        if spread is not None:
+            required_edge += spread / 2
+        if edge_yes >= required_edge:
+            side = "YES"
+            price = market.yes_ask
+            edge = edge_yes
+        elif edge_no >= required_edge:
+            side = "NO"
+            price = market.no_ask
+            edge = edge_no
+        else:
+            return None, "edge_too_low", {
+                "edge_yes": edge_yes,
+                "edge_no": edge_no,
+                "required_edge": required_edge,
+                "p_market": p_market,
+                "p_model": p_model,
+                "fee_cost": fee_cost,
+                "spread": spread,
+            }
+        if price <= 0:
+            return None, "invalid_price", {"price": price}
+        token_id = self._pick_token_id(market, side)
+        if not token_id:
+            return None, "missing_token_id", {"side": side}
+        effective_edge = edge - fee_cost - (spread / 2 if spread is not None else 0.0)
+        expected_roi = effective_edge / price
+        if expected_roi < self._config.min_expected_roi:
+            return None, "roi_too_low", {
+                "expected_roi": expected_roi,
+                "min_expected_roi": self._config.min_expected_roi,
+            }
+        trade_id = uuid.uuid4().hex[:8]
+        return (
+            TradeCandidate(
+                trade_id=trade_id,
+                market_id=market.market_id,
+                symbol=market.symbol,
+                side=side,
+                token_id=token_id,
+                price=price,
+                spread=spread,
+                p_market=p_market,
+                p_model=p_model,
+                edge=edge,
+                required_edge=required_edge,
+                effective_edge=effective_edge,
+                expected_roi=expected_roi,
+                volume_usd=market.volume_usd,
+                expiry_ts=market.expiry_ts,
+                fee_rate_bps=market.fee_rate_bps,
+                is_neg_risk=market.is_neg_risk,
+                is_yield_bearing=market.is_yield_bearing,
+                decimal_precision=market.decimal_precision,
+            ),
+            "",
+            {},
+        )
 
     def should_exit(
         self,

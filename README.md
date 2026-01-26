@@ -21,9 +21,15 @@ p_model = w_spot * p_spot + (1 - w_spot) * p_mom
 (if strike is unavailable, p_model = p_mom)
 ```
 
-If `p_model - p_market >= 0.04` the bot proposes a YES trade. If
-`p_market - p_model >= 0.04` it proposes a NO trade. Volume and expiry filters
-apply.
+The bot also accounts for fees and spread. A trade is proposed only if the
+edge clears:
+
+```
+required_edge = EDGE_THRESHOLD + (fee_rate_bps/10000)*FEE_EDGE_MULTIPLIER + spread/2
+```
+
+If `p_model - p_market >= required_edge` the bot proposes a YES trade. If
+`p_market - p_model >= required_edge` it proposes a NO trade.
 
 ## Quick start
 
@@ -90,6 +96,11 @@ are appended to `~/clawd-pnl.log` (UTC).
 Enable verbose runtime logs with:
 ```
 VERBOSE_LOGS=true
+```
+
+To log every rejection reason:
+```
+LOG_REJECTIONS=true
 ```
 
 ## Pricing model (orderbook)

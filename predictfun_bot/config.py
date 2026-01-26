@@ -95,6 +95,10 @@ class Config:
     dry_run: bool
     order_expiry_minutes: int
     verbose_logs: bool
+    log_rejections: bool
+    max_spread: float
+    min_expected_roi: float
+    fee_edge_multiplier: float
     model_k: float
     model_lookback_minutes: int
     spot_weight: float
@@ -161,6 +165,10 @@ def load_config() -> Config:
         dry_run=_get_env_bool("DRY_RUN", True),
         order_expiry_minutes=_get_env_int("ORDER_EXPIRY_MINUTES", 10),
         verbose_logs=_get_env_bool("VERBOSE_LOGS", False),
+        log_rejections=_get_env_bool("LOG_REJECTIONS", True),
+        max_spread=_get_env_float("MAX_SPREAD", 0.05),
+        min_expected_roi=_get_env_float("MIN_EXPECTED_ROI", 0.02),
+        fee_edge_multiplier=_get_env_float("FEE_EDGE_MULTIPLIER", 2.0),
         model_k=_get_env_float("MODEL_K", 10.0),
         model_lookback_minutes=_get_env_int("MODEL_LOOKBACK_MINUTES", 5),
         spot_weight=_get_env_float("SPOT_WEIGHT", 0.6),

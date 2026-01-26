@@ -86,3 +86,14 @@ class TradeLogger:
         if payload:
             data["data"] = payload
         self._write(data)
+
+    def log_reject(self, market_id: str, title: str, reason: str, details: dict | None = None) -> None:
+        payload = {
+            "event": "REJECT",
+            "market_id": market_id,
+            "title": title,
+            "reason": reason,
+        }
+        if details:
+            payload["details"] = details
+        self._write(payload)

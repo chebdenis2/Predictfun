@@ -18,11 +18,13 @@ class ApprovalManager:
 
     @staticmethod
     def format_preview(candidate: TradeCandidate, size_usd: float) -> str:
+        spread_text = f"{candidate.spread:.4f}" if candidate.spread is not None else "n/a"
         return (
             f"[{candidate.trade_id}] market={candidate.market_id} symbol={candidate.symbol} "
             f"side={candidate.side} size_usd={size_usd:.2f} "
             f"p_market={candidate.p_market:.4f} p_model={candidate.p_model:.4f} "
-            f"edge={candidate.edge:.4f} expected_roi={candidate.expected_roi:.2%}"
+            f"edge={candidate.edge:.4f} req_edge={candidate.required_edge:.4f} "
+            f"spread={spread_text} expected_roi={candidate.expected_roi:.2%}"
         )
 
     def send_preview(self, preview: str) -> None:

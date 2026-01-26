@@ -77,12 +77,37 @@ class Runner:
         else:
             print(f"[INFO] {context}")
 
+    def _log_position_metrics(self, markets_by_id: dict[str, Market]) -> None:
+        if not self._config.verbose_logs:
+            return
+        for position in self._state.get_open_positions():
+            market = markets_by_id.get(position.market_id)
+            if market is None:
+                continue
+            current_price = market.yes_bid if position.side == "YES" else market.no_bid
+            if current_price is None or current_price <= 0:
+                continue
+            pnl_usd = position.size_usd * (current_price / position.entry_price - 1.0)
+            self._logger.log_info(
+                "position_pnl",
+                {
+                    "trade_id": position.trade_id,
+                    "market_id": position.market_id,
+                    "side": position.side,
+                    "entry_price": position.entry_price,
+                    "current_price": current_price,
+                    "pnl_usd": pnl_usd,
+                },
+            )
+
     def _load_markets(self) -> list[Market]:
         try:
+            start = time.monotonic()
             raw_markets = self._predictfun.get_all_markets(
                 self._config.predictfun_max_pages,
                 self._config.predictfun_markets_page_size,
             )
+            markets_latency_ms = (time.monotonic() - start) * 1000
         except Exception as exc:  # noqa: BLE001
             self._logger.log_error("list_markets", str(exc))
             return []
@@ -90,6 +115,9 @@ class Runner:
         total = len(raw_markets)
         allowed = 0
         with_orderbook = 0
+        spreads = []
+        orderbook_latencies = []
+        stats_latencies = []
         for raw in raw_markets:
             if not isinstance(raw, dict):
                 continue
@@ -100,22 +128,41 @@ class Runner:
                 continue
             allowed += 1
             try:
+                ob_start = time.monotonic()
                 orderbook = self._predictfun.get_orderbook(base.market_id)
+                orderbook_latencies.append((time.monotonic() - ob_start) * 1000)
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("orderbook", f"{base.market_id}: {exc}")
                 continue
             with_orderbook += 1
             try:
+                st_start = time.monotonic()
                 stats = self._predictfun.get_market_stats(base.market_id)
+                stats_latencies.append((time.monotonic() - st_start) * 1000)
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("market_stats", f"{base.market_id}: {exc}")
                 stats = None
             market = apply_orderbook(base, orderbook)
             market = apply_stats(market, stats)
+            if market.yes_ask is not None and market.yes_bid is not None:
+                spreads.append(max(0.0, market.yes_ask - market.yes_bid))
             markets.append(market)
         self._log_info(
             "markets_loaded",
-            {"total": total, "allowed": allowed, "with_orderbook": with_orderbook},
+            {
+                "total": total,
+                "allowed": allowed,
+                "with_orderbook": with_orderbook,
+                "markets_latency_ms": round(markets_latency_ms, 2),
+                "orderbook_ms_avg": round(sum(orderbook_latencies) / len(orderbook_latencies), 2)
+                if orderbook_latencies
+                else None,
+                "stats_ms_avg": round(sum(stats_latencies) / len(stats_latencies), 2)
+                if stats_latencies
+                else None,
+                "spread_avg": round(sum(spreads) / len(spreads), 4) if spreads else None,
+                "spread_max": round(max(spreads), 4) if spreads else None,
+            },
         )
         return markets
 
@@ -131,6 +178,16 @@ class Runner:
                 self._logger.log_error("exit_price", f"{position.market_id}: missing price")
                 continue
             pnl_usd = position.size_usd * (current_price / position.entry_price - 1.0)
+            self._logger.log_info(
+                "position_exit_signal",
+                {
+                    "trade_id": position.trade_id,
+                    "market_id": position.market_id,
+                    "side": position.side,
+                    "pnl_usd": pnl_usd,
+                    "reason": reason,
+                },
+            )
             if self._config.dry_run:
                 self._logger.log_close(
                     position.trade_id,
@@ -176,6 +233,7 @@ class Runner:
         spot_prices: dict[str, float] = {}
         for symbol in self._config.allowed_symbols:
             try:
+                start = time.monotonic()
                 momentum_probabilities[symbol] = binance.estimate_up_probability(
                     symbol,
                     self._config.binance_base_url,
@@ -183,18 +241,48 @@ class Runner:
                     self._config.model_lookback_minutes,
                     self._config.model_k,
                 )
+                self._log_info(
+                    "binance_momentum_latency",
+                    {"symbol": symbol, "ms": round((time.monotonic() - start) * 1000, 2)},
+                )
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("binance_probability", str(exc))
             try:
+                start = time.monotonic()
                 spot_prices[symbol] = binance.get_spot_price(
                     symbol,
                     self._config.binance_base_url,
                     self._config.binance_timeout_sec,
                 )
+                self._log_info(
+                    "binance_spot_latency",
+                    {"symbol": symbol, "ms": round((time.monotonic() - start) * 1000, 2)},
+                )
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("binance_spot", str(exc))
-        candidates = self._strategy.find_candidates(markets, momentum_probabilities, spot_prices)
-        self._log_info("candidates_evaluated", {"count": len(candidates)})
+        candidates = []
+        rejected = 0
+        for market in markets:
+            start = time.monotonic()
+            candidate, reason, details = self._strategy.evaluate_market(
+                market,
+                momentum_probabilities,
+                spot_prices,
+            )
+            self._log_info(
+                "evaluate_market_latency",
+                {"market_id": market.market_id, "ms": round((time.monotonic() - start) * 1000, 2)},
+            )
+            if candidate:
+                candidates.append(candidate)
+                continue
+            rejected += 1
+            if self._config.log_rejections:
+                self._logger.log_reject(market.market_id, market.title, reason, details)
+        self._log_info(
+            "candidates_evaluated",
+            {"count": len(candidates), "rejected": rejected},
+        )
         if not candidates:
             return
         for candidate in candidates:
@@ -290,6 +378,7 @@ class Runner:
             self._maybe_report_pnl()
             return
         markets_by_id = {market.market_id: market for market in markets}
+        self._log_position_metrics(markets_by_id)
         self._handle_exits(markets_by_id)
         self._handle_entries(markets)
         self._maybe_report_pnl()
