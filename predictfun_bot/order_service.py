@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import math
 
 from .config import Config
 from .models import Position, TradeCandidate
@@ -32,13 +34,16 @@ class OrderService:
     ) -> tuple[dict, int, int]:
         builder = self._get_builder()
         price_per_share = _round_price(candidate.price, candidate.decimal_precision)
-        price_per_share_wei = _to_wei(price_per_share)
+        price_per_share_wei = _price_to_wei(price_per_share, candidate.decimal_precision)
         if price_per_share_wei <= 0:
             raise OrderServiceError("Invalid price per share.")
-        quantity = size_usd / price_per_share
+        quantity = size_usd / price_per_share if price_per_share > 0 else 0.0
         quantity_wei = _to_wei(quantity)
-        amounts = builder.get_limit_order_amounts(
-            _limit_input(side="buy", price_per_share_wei=price_per_share_wei, quantity_wei=quantity_wei)
+        quantity_wei = _quantize_quantity_wei(quantity_wei, price_per_share_wei)
+        if quantity_wei <= 0:
+            raise OrderServiceError("Order size too small after precision rounding.")
+        amounts, quantity_wei = _limit_amounts(
+            builder, "buy", price_per_share_wei, quantity_wei
         )
         order = builder.build_order(
             "LIMIT",
@@ -65,12 +70,14 @@ class OrderService:
     ) -> tuple[dict, int, int]:
         builder = self._get_builder()
         price_per_share = _round_price(price, position.decimal_precision)
-        price_per_share_wei = _to_wei(price_per_share)
+        price_per_share_wei = _price_to_wei(price_per_share, position.decimal_precision)
         if price_per_share_wei <= 0:
             raise OrderServiceError("Invalid exit price per share.")
-        quantity_wei = int(position.quantity_wei)
-        amounts = builder.get_limit_order_amounts(
-            _limit_input(side="sell", price_per_share_wei=price_per_share_wei, quantity_wei=quantity_wei)
+        quantity_wei = _quantize_quantity_wei(int(position.quantity_wei), price_per_share_wei)
+        if quantity_wei <= 0:
+            raise OrderServiceError("Exit size too small after precision rounding.")
+        amounts, quantity_wei = _limit_amounts(
+            builder, "sell", price_per_share_wei, quantity_wei
         )
         order = builder.build_order(
             "LIMIT",
@@ -106,17 +113,19 @@ class OrderService:
     ) -> tuple[dict, int, int, str]:
         builder = self._get_builder()
         price_per_share = _round_price(price, decimal_precision)
-        price_per_share_wei = _to_wei(price_per_share)
+        price_per_share_wei = _price_to_wei(price_per_share, decimal_precision)
         if price_per_share_wei <= 0:
             raise OrderServiceError("Invalid price per share.")
         quantity = size_usd / price_per_share if price_per_share > 0 else 0.0
         quantity_wei = _to_wei(quantity)
-        amounts = builder.get_limit_order_amounts(
-            _limit_input(
-                side="buy" if side.lower() == "buy" else "sell",
-                price_per_share_wei=price_per_share_wei,
-                quantity_wei=quantity_wei,
-            )
+        quantity_wei = _quantize_quantity_wei(quantity_wei, price_per_share_wei)
+        if quantity_wei <= 0:
+            raise OrderServiceError("Order size too small after precision rounding.")
+        amounts, quantity_wei = _limit_amounts(
+            builder,
+            "buy" if side.lower() == "buy" else "sell",
+            price_per_share_wei,
+            quantity_wei,
         )
         order = builder.build_order(
             "LIMIT",
@@ -141,6 +150,15 @@ class OrderService:
             }
         }
         return payload, int(amounts.taker_amount), int(amounts.price_per_share), order_hash
+
+    def estimate_quantity_wei(self, price: float, size_usd: float, decimal_precision: int) -> int:
+        price_per_share = _round_price(price, decimal_precision)
+        price_per_share_wei = _price_to_wei(price_per_share, decimal_precision)
+        if price_per_share_wei <= 0 or price_per_share <= 0:
+            return 0
+        quantity = size_usd / price_per_share
+        quantity_wei = _to_wei(quantity)
+        return _quantize_quantity_wei(quantity_wei, price_per_share_wei)
 
     def _get_builder(self):
         if self._builder is not None:
@@ -242,8 +260,61 @@ def _expires_at(minutes: int) -> datetime:
 
 
 def _to_wei(value: float) -> int:
-    return int(value * 1_000_000_000_000_000_000)
+    return int(Decimal(str(value)) * Decimal("1e18"))
 
 
 def _round_price(price: float, decimal_precision: int) -> float:
-    return round(price, decimal_precision)
+    precision = min(max(decimal_precision, 0), 5)
+    return round(price, precision)
+
+
+def _price_to_wei(price: float, decimal_precision: int) -> int:
+    precision = min(max(decimal_precision, 0), 5)
+    price_str = f"{price:.{precision}f}"
+    return int(Decimal(price_str) * Decimal("1e18"))
+
+
+def _quantize_quantity_wei(quantity_wei: int, price_per_share_wei: int) -> int:
+    if quantity_wei <= 0:
+        return 0
+    step = _quantity_step(price_per_share_wei)
+    if step <= 0:
+        return quantity_wei
+    return (quantity_wei // step) * step
+
+
+def _quantity_step(price_per_share_wei: int) -> int:
+    base = 10**13
+    if price_per_share_wei <= 0:
+        return base
+    price_units = price_per_share_wei // base
+    if price_units <= 0:
+        return base
+    step_multiplier = 100000 // math.gcd(price_units, 100000)
+    return base * step_multiplier
+
+
+def _amounts_ok(amounts: object) -> bool:
+    maker = int(getattr(amounts, "maker_amount", 0))
+    taker = int(getattr(amounts, "taker_amount", 0))
+    return maker % (10**13) == 0 and taker % (10**13) == 0
+
+
+def _limit_amounts(builder, side: str, price_per_share_wei: int, quantity_wei: int):
+    step = _quantity_step(price_per_share_wei)
+    attempts = 0
+    while quantity_wei > 0:
+        amounts = builder.get_limit_order_amounts(
+            _limit_input(
+                side=side,
+                price_per_share_wei=price_per_share_wei,
+                quantity_wei=quantity_wei,
+            )
+        )
+        if _amounts_ok(amounts):
+            return amounts, quantity_wei
+        quantity_wei -= step
+        attempts += 1
+        if attempts >= 5:
+            break
+    raise OrderServiceError("Order size too small after precision rounding.")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 import math
 import time
 
@@ -31,6 +32,7 @@ class FarmEngine:
     def run_once(self, markets: list[Market]) -> None:
         now_ts = int(time.time())
         open_orders = self._fetch_open_orders()
+        token_balances = self._fetch_token_balances()
         self._sync_orders(open_orders, now_ts)
         farm_markets = self._select_markets(markets, now_ts)
         self._ensure_market_limit(farm_markets)
@@ -39,6 +41,7 @@ class FarmEngine:
             placed += self._ensure_market_orders(
                 market,
                 open_orders,
+                token_balances,
                 now_ts,
                 self._config.farm_min_spread,
                 self._config.farm_max_spread,
@@ -55,6 +58,7 @@ class FarmEngine:
                 placed += self._ensure_market_orders(
                     market,
                     open_orders,
+                    token_balances,
                     now_ts,
                     self._config.farm_relax_min_spread,
                     self._config.farm_relax_max_spread,
@@ -75,6 +79,14 @@ class FarmEngine:
             if order_hash:
                 mapping[str(order_hash)] = item
         return mapping
+
+    def _fetch_token_balances(self) -> dict[str, int]:
+        try:
+            payload = self._client.list_positions()
+        except Exception as exc:  # noqa: BLE001
+            self._logger.log_error("list_positions", str(exc))
+            return {}
+        return _parse_token_balances(payload)
 
     def _sync_orders(self, open_orders: dict[str, dict], now_ts: int) -> None:
         for farm_order in self._state.list_farm_orders():
@@ -180,6 +192,7 @@ class FarmEngine:
         self,
         market: Market,
         open_orders: dict[str, dict],
+        token_balances: dict[str, int],
         now_ts: int,
         min_spread: float,
         max_spread: float,
@@ -219,6 +232,29 @@ class FarmEngine:
                         self._logger.log_error("farm_cancel", str(exc))
                         continue
                 self._state.remove_farm_order(market.market_id, side)
+            if side == "sell":
+                required_wei = self._orders.estimate_quantity_wei(
+                    price,
+                    self._config.farm_order_usd,
+                    market.decimal_precision,
+                )
+                available_wei = token_balances.get(token_id, 0)
+                if required_wei <= 0:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_min_size",
+                        {"price": price, "size_usd": self._config.farm_order_usd},
+                    )
+                    continue
+                if available_wei < required_wei:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_no_inventory",
+                        {"available_wei": available_wei, "required_wei": required_wei},
+                    )
+                    continue
             if not self._has_budget():
                 self._logger.log_reject(market.market_id, market.title, "farm_budget", {})
                 return placed
@@ -234,6 +270,14 @@ class FarmEngine:
                     is_yield_bearing=market.is_yield_bearing,
                 )
                 response = self._client.create_order(payload)
+            except OrderServiceError as exc:
+                self._logger.log_reject(
+                    market.market_id,
+                    market.title,
+                    "farm_order_size",
+                    {"error": str(exc)},
+                )
+                continue
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("farm_place", str(exc))
                 return placed
@@ -268,6 +312,8 @@ class FarmEngine:
         return reserved + self._config.farm_order_usd <= self._config.budget_total_usd
 
     def _enrich_market(self, market: Market) -> Market:
+        if market.outcomes and market.decimal_precision > 0:
+            return market
         try:
             details = self._client.get_market_details(market.market_id)
         except Exception as exc:  # noqa: BLE001
@@ -386,3 +432,87 @@ def _safe_float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _parse_token_balances(payload: object) -> dict[str, int]:
+    data = payload
+    if isinstance(payload, dict):
+        data = payload.get("data")
+    if not isinstance(data, list):
+        return {}
+    balances: dict[str, int] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        token_id = _extract_token_id(item)
+        if not token_id:
+            continue
+        amount = _extract_available_amount(item)
+        if amount is None:
+            continue
+        current = balances.get(token_id, 0)
+        if amount > current:
+            balances[token_id] = amount
+    return balances
+
+
+def _extract_token_id(item: dict) -> str:
+    token_id = item.get("tokenId") or item.get("token_id") or item.get("tokenID")
+    if not token_id:
+        token_id = item.get("outcomeTokenId") or item.get("outcome_token_id")
+    if not token_id:
+        token = item.get("token")
+        if isinstance(token, dict):
+            token_id = token.get("id") or token.get("tokenId")
+    if not token_id:
+        outcome = item.get("outcome")
+        if isinstance(outcome, dict):
+            token_id = outcome.get("tokenId") or outcome.get("onChainId") or outcome.get("id")
+    return str(token_id) if token_id else ""
+
+
+def _extract_available_amount(item: dict) -> int | None:
+    candidates = [
+        "amountAvailable",
+        "available",
+        "balance",
+        "tokenAmount",
+        "amount",
+        "quantity",
+        "positionSize",
+        "shares",
+    ]
+    for key in candidates:
+        if key in item and item[key] is not None:
+            value = item[key]
+            if isinstance(value, dict):
+                for nested_key in ("available", "balance", "amount"):
+                    if nested_key in value:
+                        parsed = _parse_wei_amount(value[nested_key])
+                        if parsed is not None:
+                            return parsed
+                continue
+            parsed = _parse_wei_amount(value)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _parse_wei_amount(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, float):
+        return max(int(Decimal(str(value)) * Decimal("1e18")), 0)
+    if isinstance(value, str):
+        token = value.strip()
+        if not token:
+            return None
+        if token.isdigit():
+            return int(token)
+        try:
+            return max(int(Decimal(token) * Decimal("1e18")), 0)
+        except Exception:  # noqa: BLE001
+            return None
+    return None

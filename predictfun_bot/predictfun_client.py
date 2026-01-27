@@ -57,7 +57,12 @@ class PredictFunClient:
         return url
 
     def _headers(self, require_auth: bool) -> dict[str, str]:
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0",
+            "Origin": "https://predict.fun",
+            "Referer": "https://predict.fun/",
+        }
         if self._api_key:
             headers[self._api_key_header] = self._api_key
         if require_auth:
