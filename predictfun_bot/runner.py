@@ -133,6 +133,16 @@ class Runner:
                     True,
                 )
                 raw_markets, end_cursor = result
+                if not raw_markets and cursor:
+                    self._log_info("cursor_reset", {"source": "graphql"})
+                    raw_markets, end_cursor = self._predictfun.get_all_markets_graphql(
+                        self._config.predictfun_max_pages,
+                        self._config.predictfun_markets_page_size,
+                        self._config.predictfun_page_sleep_sec,
+                        self._config.predictfun_graphql_is_resolved,
+                        None,
+                        True,
+                    )
                 if end_cursor:
                     self._state.set_markets_cursor("graphql", end_cursor)
             else:
@@ -149,6 +159,17 @@ class Runner:
                     True,
                 )
                 raw_markets, end_cursor = result
+                if not raw_markets and cursor:
+                    self._log_info("cursor_reset", {"source": "rest"})
+                    raw_markets, end_cursor = self._predictfun.get_all_markets(
+                        self._config.predictfun_max_pages,
+                        self._config.predictfun_markets_page_size,
+                        self._config.predictfun_page_sleep_sec,
+                        self._config.predictfun_max_page_errors,
+                        self._config.predictfun_markets_statuses,
+                        None,
+                        True,
+                    )
                 if end_cursor:
                     self._state.set_markets_cursor("rest", end_cursor)
             markets_latency_ms = (time.monotonic() - start) * 1000
