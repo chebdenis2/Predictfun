@@ -228,7 +228,7 @@ class PredictFunClient:
             "    id title question description status spreadThreshold shareThreshold "
             "    decimalPrecision makerFeeBps takerFeeBps isTradingEnabled "
             "    statistics{ totalLiquidityUsd volumeTotalUsd volume24hUsd } "
-            "    outcomes{ name index onChainId status }"
+            "    outcomes{ edges{ node{ name index onChainId status } } }"
             "  }} "
             "  pageInfo{ endCursor hasNextPage }"
             " } }"
@@ -293,17 +293,35 @@ def _clamp_first(value: int) -> int:
 def _normalize_graphql_market(node: dict) -> dict:
     stats = node.get("statistics") or {}
     outcomes = []
-    for outcome in node.get("outcomes") or []:
-        if not isinstance(outcome, dict):
-            continue
-        outcomes.append(
-            {
-                "name": outcome.get("name"),
-                "indexSet": outcome.get("index"),
-                "onChainId": outcome.get("onChainId"),
-                "status": outcome.get("status"),
-            }
-        )
+    raw_outcomes = node.get("outcomes")
+    if isinstance(raw_outcomes, dict) and "edges" in raw_outcomes:
+        edges = raw_outcomes.get("edges") or []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            outcome = edge.get("node") or {}
+            if not isinstance(outcome, dict):
+                continue
+            outcomes.append(
+                {
+                    "name": outcome.get("name"),
+                    "indexSet": outcome.get("index"),
+                    "onChainId": outcome.get("onChainId"),
+                    "status": outcome.get("status"),
+                }
+            )
+    elif isinstance(raw_outcomes, list):
+        for outcome in raw_outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            outcomes.append(
+                {
+                    "name": outcome.get("name"),
+                    "indexSet": outcome.get("index"),
+                    "onChainId": outcome.get("onChainId"),
+                    "status": outcome.get("status"),
+                }
+            )
     fee_bps = node.get("takerFeeBps") or node.get("makerFeeBps") or 0
     return {
         "id": node.get("id"),
