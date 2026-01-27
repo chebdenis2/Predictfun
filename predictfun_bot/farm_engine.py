@@ -34,8 +34,31 @@ class FarmEngine:
         self._sync_orders(open_orders, now_ts)
         farm_markets = self._select_markets(markets, now_ts)
         self._ensure_market_limit(farm_markets)
+        placed = 0
         for market in farm_markets:
-            self._ensure_market_orders(market, open_orders, now_ts)
+            placed += self._ensure_market_orders(
+                market,
+                open_orders,
+                now_ts,
+                self._config.farm_min_spread,
+                self._config.farm_max_spread,
+            )
+        if placed == 0 and self._config.farm_auto_relax:
+            self._logger.log_info(
+                "farm_auto_relax",
+                {
+                    "min_spread": self._config.farm_relax_min_spread,
+                    "max_spread": self._config.farm_relax_max_spread,
+                },
+            )
+            for market in farm_markets:
+                placed += self._ensure_market_orders(
+                    market,
+                    open_orders,
+                    now_ts,
+                    self._config.farm_relax_min_spread,
+                    self._config.farm_relax_max_spread,
+                )
 
     def _fetch_open_orders(self) -> dict[str, dict]:
         try:
@@ -153,22 +176,30 @@ class FarmEngine:
             return
         del markets[max_markets:]
 
-    def _ensure_market_orders(self, market: Market, open_orders: dict[str, dict], now_ts: int) -> None:
+    def _ensure_market_orders(
+        self,
+        market: Market,
+        open_orders: dict[str, dict],
+        now_ts: int,
+        min_spread: float,
+        max_spread: float,
+    ) -> int:
         market = self._enrich_market(market)
         prices = _compute_bid_ask(
             market,
-            self._config.farm_min_spread,
-            self._config.farm_max_spread,
+            min_spread,
+            max_spread,
             self._config.farm_top_levels,
         )
         if prices is None:
             self._logger.log_reject(market.market_id, market.title, "farm_no_prices", {})
-            return
+            return 0
         token_id = _pick_yes_token_id(market)
         if not token_id:
             self._logger.log_reject(market.market_id, market.title, "farm_no_token", {})
-            return
+            return 0
         bid_price, ask_price = prices
+        placed = 0
         for side, price in (("buy", bid_price), ("sell", ask_price)):
             existing = _find_state_order(self._state.get_farm_orders(), market.market_id, side)
             if existing:
@@ -190,7 +221,7 @@ class FarmEngine:
                 self._state.remove_farm_order(market.market_id, side)
             if not self._has_budget():
                 self._logger.log_reject(market.market_id, market.title, "farm_budget", {})
-                return
+                return placed
             try:
                 payload, quantity_wei, _, order_hash = self._orders.build_limit_order(
                     side=side,
@@ -205,7 +236,7 @@ class FarmEngine:
                 response = self._client.create_order(payload)
             except Exception as exc:  # noqa: BLE001
                 self._logger.log_error("farm_place", str(exc))
-                return
+                return placed
             order_id = _extract_order_id(response)
             farm_order = FarmOrder(
                 market_id=market.market_id,
@@ -228,6 +259,8 @@ class FarmEngine:
                     "hash": order_hash,
                 },
             )
+            placed += 1
+        return placed
 
     def _has_budget(self) -> bool:
         open_orders = self._state.list_farm_orders()

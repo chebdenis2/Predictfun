@@ -133,6 +133,14 @@ For farming, the bot places **both bid and ask** within top-5 orderbook levels
 and keeps them open for at least `FARM_MIN_HOLD_SEC` seconds. It favors markets
 with 50-150k volume and avoids high volatility near expiry.
 
+Auto-relax mode (optional): if no orders can be placed, the bot can temporarily
+relax spread bounds:
+```
+FARM_AUTO_RELAX=true
+FARM_RELAX_MIN_SPREAD=0.002
+FARM_RELAX_MAX_SPREAD=0.01
+```
+
 ## Pricing model (orderbook)
 
 Predict.fun orderbooks are **YES-side only**. The bot derives NO prices using

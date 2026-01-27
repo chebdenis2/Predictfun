@@ -125,6 +125,9 @@ class Config:
     ws_orderbook_snapshot_sec: float
     ws_orderbook_max_topics: int
     ws_orderbook_batch_sleep_sec: float
+    farm_auto_relax: bool
+    farm_relax_min_spread: float
+    farm_relax_max_spread: float
     model_k: float
     model_lookback_minutes: int
     spot_weight: float
@@ -223,6 +226,9 @@ def load_config() -> Config:
         ws_orderbook_snapshot_sec=_get_env_float("WS_ORDERBOOK_SNAPSHOT_SEC", 6.0),
         ws_orderbook_max_topics=_get_env_int("WS_ORDERBOOK_MAX_TOPICS", 50),
         ws_orderbook_batch_sleep_sec=_get_env_float("WS_ORDERBOOK_BATCH_SLEEP_SEC", 0.2),
+        farm_auto_relax=_get_env_bool("FARM_AUTO_RELAX", True),
+        farm_relax_min_spread=_get_env_float("FARM_RELAX_MIN_SPREAD", 0.002),
+        farm_relax_max_spread=_get_env_float("FARM_RELAX_MAX_SPREAD", 0.01),
         model_k=_get_env_float("MODEL_K", 10.0),
         model_lookback_minutes=_get_env_int("MODEL_LOOKBACK_MINUTES", 5),
         spot_weight=_get_env_float("SPOT_WEIGHT", 0.6),
