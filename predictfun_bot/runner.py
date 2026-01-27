@@ -141,6 +141,7 @@ class Runner:
                             "kind": base.kind,
                             "symbol": base.symbol,
                             "resolution": base.resolution_minutes,
+                            "mode": self._config.strategy_mode,
                         },
                     )
                 continue

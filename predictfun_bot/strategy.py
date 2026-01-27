@@ -41,15 +41,56 @@ class Strategy:
         return self._clamp((weight * spot) + ((1.0 - weight) * momentum))
 
     def is_allowed_market(self, market: Market) -> bool:
-        if not market.symbol or market.symbol not in self._config.allowed_symbols:
+        mode = self._config.strategy_mode.lower()
+        if mode == "farm":
+            if not self._is_allowed_kind(market.kind):
+                return False
+            if not self._is_allowed_status(market.status):
+                return False
+            return True
+        if not self._is_allowed_symbol(market.symbol):
             return False
-        if market.resolution_minutes and market.resolution_minutes not in self._config.allowed_resolution_minutes:
+        if not self._is_allowed_resolution(market.resolution_minutes):
             return False
-        if market.kind and market.kind not in self._config.allowed_kinds:
+        if not self._is_allowed_kind(market.kind):
             return False
-        if market.status and market.status not in self._config.allowed_statuses:
+        if not self._is_allowed_status(market.status):
             return False
         return True
+
+    def _is_allowed_symbol(self, symbol: str) -> bool:
+        if not symbol:
+            return False
+        allowed = {item.lower() for item in self._config.allowed_symbols}
+        if not allowed:
+            return True
+        if "*" in allowed or "all" in allowed:
+            return True
+        return symbol.lower() in allowed
+
+    def _is_allowed_resolution(self, resolution: int) -> bool:
+        if resolution <= 0:
+            return False
+        allowed = set(self._config.allowed_resolution_minutes)
+        if not allowed or 0 in allowed:
+            return True
+        return resolution in allowed
+
+    def _is_allowed_kind(self, kind: str) -> bool:
+        if not kind:
+            return True
+        allowed = {item.lower() for item in self._config.allowed_kinds}
+        if not allowed or "*" in allowed or "all" in allowed:
+            return True
+        return kind.lower() in allowed
+
+    def _is_allowed_status(self, status: str) -> bool:
+        if not status:
+            return True
+        allowed = {item.lower() for item in self._config.allowed_statuses}
+        if not allowed or "*" in allowed or "all" in allowed:
+            return True
+        return status.lower() in allowed
 
     def find_candidates(
         self,

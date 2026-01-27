@@ -48,6 +48,15 @@ Farm settings (defaults in `.env.example`):
 - `FARM_AVOID_MINUTES` / `FARM_MAX_VOLATILITY`: avoid high volatility near expiry.
 - `FARM_TOP_LEVELS`: ensure orders stay within top-5 levels.
 
+For farming across all instruments, set:
+```
+STRATEGY_MODE=farm
+ALLOWED_SYMBOLS=*
+ALLOWED_RESOLUTIONS=
+```
+The farm mode ignores symbol/resolution filters and only applies status/kind +
+liquidity/volatility constraints.
+
 ## Quick start
 
 1. Install dependencies:
