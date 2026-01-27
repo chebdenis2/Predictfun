@@ -100,12 +100,19 @@ class PredictFunClient:
     def _format_path(template: str, market_id: str) -> str:
         return template.format(id=market_id)
 
-    def list_markets(self, after: str | None = None, first: int | None = None) -> tuple[list[dict], str | None]:
+    def list_markets(
+        self,
+        after: str | None = None,
+        first: int | None = None,
+        status: str | None = None,
+    ) -> tuple[list[dict], str | None]:
         params: dict[str, str] = {}
         if after:
             params["after"] = str(after)
         if first:
-            params["first"] = str(first)
+            params["first"] = str(_clamp_first(first))
+        if status:
+            params["status"] = status
         if not params:
             params = None
         payload = self._request_json("GET", self._markets_path, params=params)
@@ -125,27 +132,50 @@ class PredictFunClient:
         page_size: int | None = None,
         sleep_sec: float = 0.0,
         max_errors: int = 0,
+        statuses: tuple[str, ...] | None = None,
     ) -> list[dict]:
         markets: list[dict] = []
+        seen_ids: set[str] = set()
         cursor = None
         errors = 0
-        for _ in range(max_pages):
-            try:
-                data, cursor = self.list_markets(cursor, page_size)
-                markets.extend(data)
-                if not cursor:
-                    break
-                if sleep_sec > 0:
-                    time.sleep(sleep_sec)
-            except RuntimeError as exc:
-                errors += 1
-                if "HTTP 403" in str(exc) or "HTTP 429" in str(exc):
-                    break
-                if max_errors and errors >= max_errors:
-                    break
-                if sleep_sec > 0:
-                    time.sleep(sleep_sec)
+        status_list = tuple(statuses or ())
+        if not status_list:
+            status_list = (None,)
+        for status in status_list:
+            cursor = None
+            for _ in range(max_pages):
+                try:
+                    data, cursor = self.list_markets(cursor, page_size, status)
+                    for item in data:
+                        market_id = str(item.get("id") or "")
+                        if market_id and market_id in seen_ids:
+                            continue
+                        if market_id:
+                            seen_ids.add(market_id)
+                        markets.append(item)
+                    if not cursor:
+                        break
+                    if sleep_sec > 0:
+                        time.sleep(sleep_sec)
+                except RuntimeError as exc:
+                    errors += 1
+                    if "HTTP 400" in str(exc) and status:
+                        break
+                    if "HTTP 403" in str(exc) or "HTTP 429" in str(exc):
+                        break
+                    if max_errors and errors >= max_errors:
+                        break
+                    if sleep_sec > 0:
+                        time.sleep(sleep_sec)
         return markets
+
+
+def _clamp_first(value: int) -> int:
+    if value < 1:
+        return 1
+    if value > 150:
+        return 150
+    return value
 
     def get_orderbook(self, market_id: str) -> dict:
         path = self._format_path(self._orderbook_path, market_id)

@@ -166,3 +166,9 @@ adjust `PREDICTFUN_MAX_PAGES` and `PREDICTFUN_MARKETS_PAGE_SIZE` in `.env`.
 
 To avoid rate limits, the bot can sleep between pages (`PREDICTFUN_PAGE_SLEEP_SEC`)
 and will stop pagination after repeated errors (`PREDICTFUN_MAX_PAGE_ERRORS`).
+
+If the API supports it, you can request only specific market statuses with:
+```
+PREDICTFUN_MARKETS_STATUSES=UNPAUSED,PRICE_PROPOSED,REGISTERED,PAUSED
+```
+The client will fall back gracefully if the status filter is not supported.

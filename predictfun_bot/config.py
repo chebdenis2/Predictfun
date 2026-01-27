@@ -75,6 +75,7 @@ class Config:
     predictfun_markets_page_size: int
     predictfun_page_sleep_sec: float
     predictfun_max_page_errors: int
+    predictfun_markets_statuses: tuple[str, ...]
     predictfun_timeout_sec: int
     predictfun_api_key: str | None
     predictfun_api_key_header: str
@@ -159,6 +160,7 @@ def load_config() -> Config:
         predictfun_markets_page_size=_get_env_int("PREDICTFUN_MARKETS_PAGE_SIZE", 50),
         predictfun_page_sleep_sec=_get_env_float("PREDICTFUN_PAGE_SLEEP_SEC", 0.35),
         predictfun_max_page_errors=_get_env_int("PREDICTFUN_MAX_PAGE_ERRORS", 2),
+        predictfun_markets_statuses=_parse_csv(_get_env_str("PREDICTFUN_MARKETS_STATUSES", "")),
         predictfun_timeout_sec=_get_env_int("PREDICTFUN_TIMEOUT_SEC", 10),
         predictfun_api_key=_get_env_optional("PREDICTFUN_API_KEY"),
         predictfun_api_key_header=_get_env_str("PREDICTFUN_API_KEY_HEADER", "x-api-key"),

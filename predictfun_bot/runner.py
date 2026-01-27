@@ -110,6 +110,7 @@ class Runner:
                 self._config.predictfun_markets_page_size,
                 self._config.predictfun_page_sleep_sec,
                 self._config.predictfun_max_page_errors,
+                self._config.predictfun_markets_statuses,
             )
             markets_latency_ms = (time.monotonic() - start) * 1000
         except Exception as exc:  # noqa: BLE001
