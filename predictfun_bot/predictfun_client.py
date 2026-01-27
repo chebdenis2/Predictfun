@@ -281,64 +281,6 @@ class PredictFunClient:
             raise RuntimeError(f"Predict.fun market error: {payload}")
         return payload["data"]
 
-
-def _clamp_first(value: int) -> int:
-    if value < 1:
-        return 1
-    if value > 150:
-        return 150
-    return value
-
-
-def _normalize_graphql_market(node: dict) -> dict:
-    stats = node.get("statistics") or {}
-    outcomes = []
-    raw_outcomes = node.get("outcomes")
-    if isinstance(raw_outcomes, dict) and "edges" in raw_outcomes:
-        edges = raw_outcomes.get("edges") or []
-        for edge in edges:
-            if not isinstance(edge, dict):
-                continue
-            outcome = edge.get("node") or {}
-            if not isinstance(outcome, dict):
-                continue
-            outcomes.append(
-                {
-                    "name": outcome.get("name"),
-                    "indexSet": outcome.get("index"),
-                    "onChainId": outcome.get("onChainId"),
-                    "status": outcome.get("status"),
-                }
-            )
-    elif isinstance(raw_outcomes, list):
-        for outcome in raw_outcomes:
-            if not isinstance(outcome, dict):
-                continue
-            outcomes.append(
-                {
-                    "name": outcome.get("name"),
-                    "indexSet": outcome.get("index"),
-                    "onChainId": outcome.get("onChainId"),
-                    "status": outcome.get("status"),
-                }
-            )
-    fee_bps = node.get("takerFeeBps") or node.get("makerFeeBps") or 0
-    return {
-        "id": node.get("id"),
-        "imageUrl": node.get("imageUrl"),
-        "title": node.get("title"),
-        "question": node.get("question"),
-        "description": node.get("description"),
-        "status": node.get("status"),
-        "feeRateBps": fee_bps,
-        "spreadThreshold": node.get("spreadThreshold"),
-        "shareThreshold": node.get("shareThreshold"),
-        "decimalPrecision": node.get("decimalPrecision"),
-        "statistics": stats,
-        "outcomes": outcomes,
-        "isTradingEnabled": node.get("isTradingEnabled"),
-    }
-
     def get_orderbook(self, market_id: str) -> dict:
         path = self._format_path(self._orderbook_path, market_id)
         payload = self._request_json("GET", path)
@@ -419,3 +361,62 @@ def _normalize_graphql_market(node: dict) -> dict:
 
     def get_account(self) -> object:
         return self._request_json("GET", self._balance_path, require_auth=True)
+
+
+def _clamp_first(value: int) -> int:
+    if value < 1:
+        return 1
+    if value > 150:
+        return 150
+    return value
+
+
+def _normalize_graphql_market(node: dict) -> dict:
+    stats = node.get("statistics") or {}
+    outcomes = []
+    raw_outcomes = node.get("outcomes")
+    if isinstance(raw_outcomes, dict) and "edges" in raw_outcomes:
+        edges = raw_outcomes.get("edges") or []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            outcome = edge.get("node") or {}
+            if not isinstance(outcome, dict):
+                continue
+            outcomes.append(
+                {
+                    "name": outcome.get("name"),
+                    "indexSet": outcome.get("index"),
+                    "onChainId": outcome.get("onChainId"),
+                    "status": outcome.get("status"),
+                }
+            )
+    elif isinstance(raw_outcomes, list):
+        for outcome in raw_outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            outcomes.append(
+                {
+                    "name": outcome.get("name"),
+                    "indexSet": outcome.get("index"),
+                    "onChainId": outcome.get("onChainId"),
+                    "status": outcome.get("status"),
+                }
+            )
+    fee_bps = node.get("takerFeeBps") or node.get("makerFeeBps") or 0
+    return {
+        "id": node.get("id"),
+        "imageUrl": node.get("imageUrl"),
+        "title": node.get("title"),
+        "question": node.get("question"),
+        "description": node.get("description"),
+        "status": node.get("status"),
+        "feeRateBps": fee_bps,
+        "spreadThreshold": node.get("spreadThreshold"),
+        "shareThreshold": node.get("shareThreshold"),
+        "decimalPrecision": node.get("decimalPrecision"),
+        "statistics": stats,
+        "outcomes": outcomes,
+        "isTradingEnabled": node.get("isTradingEnabled"),
+    }
+
