@@ -31,6 +31,7 @@ def _build_runner() -> Runner:
         config.predictfun_api_key_header,
         config.predictfun_auth_header,
         config.predictfun_jwt,
+        config.predictfun_graphql_url,
     )
     state = StateStore(config.state_path)
     auth = AuthManager(config, client, state)

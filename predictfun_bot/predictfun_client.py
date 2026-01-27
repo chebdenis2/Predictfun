@@ -24,6 +24,7 @@ class PredictFunClient:
         api_key_header: str,
         auth_header: str,
         jwt_token: str | None = None,
+        graphql_url: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._markets_path = markets_path
@@ -39,6 +40,7 @@ class PredictFunClient:
         self._api_key_header = api_key_header
         self._auth_header = auth_header
         self._jwt_token = jwt_token
+        self._graphql_url = graphql_url
 
     def set_jwt(self, token: str | None) -> None:
         self._jwt_token = token
@@ -95,6 +97,32 @@ class PredictFunClient:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Invalid JSON from Predict.fun: {exc}") from exc
+
+    def _graphql_request(self, query: str, variables: dict | None = None) -> object:
+        if not self._graphql_url:
+            raise RuntimeError("PREDICTFUN_GRAPHQL_URL is not configured.")
+        payload = {"query": query}
+        if variables:
+            payload["variables"] = variables
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            self._graphql_url,
+            data=data,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Predict.fun GraphQL request failed: {exc}") from exc
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid JSON from Predict.fun GraphQL: {exc}") from exc
+        if isinstance(payload, dict) and payload.get("errors"):
+            raise RuntimeError(f"Predict.fun GraphQL error: {payload['errors']}")
+        return payload
 
     @staticmethod
     def _format_path(template: str, market_id: str) -> str:
@@ -169,6 +197,68 @@ class PredictFunClient:
                         time.sleep(sleep_sec)
         return markets
 
+    def list_markets_graphql(
+        self,
+        after: str | None = None,
+        first: int | None = None,
+        is_resolved: bool | None = None,
+    ) -> tuple[list[dict], str | None, bool]:
+        query = (
+            "query Markets($first:Int,$after:String,$isResolved:Boolean){"
+            " markets(pagination:{first:$first, after:$after}, filter:{isResolved:$isResolved}){"
+            "  edges{ cursor node{"
+            "    id title question description status spreadThreshold shareThreshold "
+            "    decimalPrecision makerFeeBps takerFeeBps isTradingEnabled "
+            "    statistics{ totalLiquidityUsd volumeTotalUsd volume24hUsd } "
+            "    outcomes{ name index onChainId status }"
+            "  }} "
+            "  pageInfo{ endCursor hasNextPage }"
+            " } }"
+        )
+        variables = {"first": _clamp_first(first or 50)}
+        if after:
+            variables["after"] = after
+        if is_resolved is not None:
+            variables["isResolved"] = bool(is_resolved)
+        payload = self._graphql_request(query, variables)
+        data = payload.get("data", {}).get("markets", {})
+        edges = data.get("edges") or []
+        page_info = data.get("pageInfo") or {}
+        items: list[dict] = []
+        for edge in edges:
+            node = edge.get("node")
+            if not isinstance(node, dict):
+                continue
+            items.append(_normalize_graphql_market(node))
+        return items, page_info.get("endCursor"), bool(page_info.get("hasNextPage"))
+
+    def get_all_markets_graphql(
+        self,
+        max_pages: int = 3,
+        page_size: int | None = None,
+        sleep_sec: float = 0.0,
+        is_resolved: bool | None = None,
+    ) -> list[dict]:
+        markets: list[dict] = []
+        cursor = None
+        for _ in range(max_pages):
+            items, cursor, has_next = self.list_markets_graphql(cursor, page_size, is_resolved)
+            markets.extend(items)
+            if not has_next or not cursor:
+                break
+            if sleep_sec > 0:
+                time.sleep(sleep_sec)
+        return markets
+
+    def get_market_details(self, market_id: str) -> dict:
+        path = f"{self._markets_path.rstrip('/')}/{market_id}"
+        payload = self._request_json("GET", path)
+        if not isinstance(payload, dict) or "data" not in payload:
+            raise RuntimeError(f"Unexpected market payload: {payload}")
+        if payload.get("success") is False:
+            raise RuntimeError(f"Predict.fun market error: {payload}")
+        return payload["data"]
+
 
 def _clamp_first(value: int) -> int:
     if value < 1:
@@ -176,6 +266,38 @@ def _clamp_first(value: int) -> int:
     if value > 150:
         return 150
     return value
+
+
+def _normalize_graphql_market(node: dict) -> dict:
+    stats = node.get("statistics") or {}
+    outcomes = []
+    for outcome in node.get("outcomes") or []:
+        if not isinstance(outcome, dict):
+            continue
+        outcomes.append(
+            {
+                "name": outcome.get("name"),
+                "indexSet": outcome.get("index"),
+                "onChainId": outcome.get("onChainId"),
+                "status": outcome.get("status"),
+            }
+        )
+    fee_bps = node.get("takerFeeBps") or node.get("makerFeeBps") or 0
+    return {
+        "id": node.get("id"),
+        "imageUrl": node.get("imageUrl"),
+        "title": node.get("title"),
+        "question": node.get("question"),
+        "description": node.get("description"),
+        "status": node.get("status"),
+        "feeRateBps": fee_bps,
+        "spreadThreshold": node.get("spreadThreshold"),
+        "shareThreshold": node.get("shareThreshold"),
+        "decimalPrecision": node.get("decimalPrecision"),
+        "statistics": stats,
+        "outcomes": outcomes,
+        "isTradingEnabled": node.get("isTradingEnabled"),
+    }
 
     def get_orderbook(self, market_id: str) -> dict:
         path = self._format_path(self._orderbook_path, market_id)

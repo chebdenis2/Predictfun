@@ -172,3 +172,11 @@ If the API supports it, you can request only specific market statuses with:
 PREDICTFUN_MARKETS_STATUSES=UNPAUSED,PRICE_PROPOSED,REGISTERED,PAUSED
 ```
 The client will fall back gracefully if the status filter is not supported.
+
+The web app appears to use GraphQL for open markets. You can switch to GraphQL
+listing with:
+```
+PREDICTFUN_MARKETS_SOURCE=graphql
+PREDICTFUN_GRAPHQL_URL=https://graphql.predict.fun/graphql
+PREDICTFUN_GRAPHQL_IS_RESOLVED=false
+```

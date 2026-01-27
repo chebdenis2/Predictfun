@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 import time
 
 from .config import Config
+from .market_parser import build_market_base
 from .models import FarmOrder, Market
 from .order_service import OrderService, OrderServiceError
 from .predictfun_client import PredictFunClient
@@ -152,6 +154,7 @@ class FarmEngine:
         del markets[max_markets:]
 
     def _ensure_market_orders(self, market: Market, open_orders: dict[str, dict], now_ts: int) -> None:
+        market = self._enrich_market(market)
         prices = _compute_bid_ask(
             market,
             self._config.farm_min_spread,
@@ -230,6 +233,22 @@ class FarmEngine:
         open_orders = self._state.list_farm_orders()
         reserved = len(open_orders) * self._config.farm_order_usd
         return reserved + self._config.farm_order_usd <= self._config.budget_total_usd
+
+    def _enrich_market(self, market: Market) -> Market:
+        try:
+            details = self._client.get_market_details(market.market_id)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.log_error("farm_market_details", str(exc))
+            return market
+        enriched = build_market_base(details)
+        return replace(
+            market,
+            fee_rate_bps=enriched.fee_rate_bps,
+            is_neg_risk=enriched.is_neg_risk,
+            is_yield_bearing=enriched.is_yield_bearing,
+            decimal_precision=enriched.decimal_precision,
+            outcomes=enriched.outcomes,
+        )
 
 
 def _mid_price(market: Market) -> float | None:

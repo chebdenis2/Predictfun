@@ -105,13 +105,21 @@ class Runner:
     def _load_markets(self) -> list[Market]:
         try:
             start = time.monotonic()
-            raw_markets = self._predictfun.get_all_markets(
-                self._config.predictfun_max_pages,
-                self._config.predictfun_markets_page_size,
-                self._config.predictfun_page_sleep_sec,
-                self._config.predictfun_max_page_errors,
-                self._config.predictfun_markets_statuses,
-            )
+            if self._config.predictfun_markets_source.lower() == "graphql":
+                raw_markets = self._predictfun.get_all_markets_graphql(
+                    self._config.predictfun_max_pages,
+                    self._config.predictfun_markets_page_size,
+                    self._config.predictfun_page_sleep_sec,
+                    self._config.predictfun_graphql_is_resolved,
+                )
+            else:
+                raw_markets = self._predictfun.get_all_markets(
+                    self._config.predictfun_max_pages,
+                    self._config.predictfun_markets_page_size,
+                    self._config.predictfun_page_sleep_sec,
+                    self._config.predictfun_max_page_errors,
+                    self._config.predictfun_markets_statuses,
+                )
             markets_latency_ms = (time.monotonic() - start) * 1000
         except Exception as exc:  # noqa: BLE001
             self._logger.log_error("list_markets", str(exc))

@@ -19,6 +19,8 @@ def build_market_base(item: dict) -> Market:
     title = str(item.get("title") or "")
     question = str(item.get("question") or "")
     status = str(item.get("status") or "")
+    if not status and isinstance(item.get("statistics"), dict) and item.get("statistics", {}).get("isResolved"):
+        status = "RESOLVED"
     outcomes = _parse_outcomes(item.get("outcomes"))
     symbol = _parse_symbol(title, question)
     resolution_minutes = _parse_resolution_minutes(title, question)

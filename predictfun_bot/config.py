@@ -76,6 +76,9 @@ class Config:
     predictfun_page_sleep_sec: float
     predictfun_max_page_errors: int
     predictfun_markets_statuses: tuple[str, ...]
+    predictfun_markets_source: str
+    predictfun_graphql_url: str
+    predictfun_graphql_is_resolved: bool
     predictfun_timeout_sec: int
     predictfun_api_key: str | None
     predictfun_api_key_header: str
@@ -161,6 +164,11 @@ def load_config() -> Config:
         predictfun_page_sleep_sec=_get_env_float("PREDICTFUN_PAGE_SLEEP_SEC", 0.35),
         predictfun_max_page_errors=_get_env_int("PREDICTFUN_MAX_PAGE_ERRORS", 2),
         predictfun_markets_statuses=_parse_csv(_get_env_str("PREDICTFUN_MARKETS_STATUSES", "")),
+        predictfun_markets_source=_get_env_str("PREDICTFUN_MARKETS_SOURCE", "rest"),
+        predictfun_graphql_url=_get_env_str(
+            "PREDICTFUN_GRAPHQL_URL", "https://graphql.predict.fun/graphql"
+        ),
+        predictfun_graphql_is_resolved=_get_env_bool("PREDICTFUN_GRAPHQL_IS_RESOLVED", False),
         predictfun_timeout_sec=_get_env_int("PREDICTFUN_TIMEOUT_SEC", 10),
         predictfun_api_key=_get_env_optional("PREDICTFUN_API_KEY"),
         predictfun_api_key_header=_get_env_str("PREDICTFUN_API_KEY_HEADER", "x-api-key"),
