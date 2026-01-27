@@ -112,11 +112,15 @@ class Config:
     farm_min_volume_usd: float
     farm_max_volume_usd: float
     farm_order_usd: float
+    farm_order_usd_min: float
+    farm_order_usd_max: float
     farm_max_open_markets: int
     farm_avoid_minutes: int
     farm_max_volatility: float
     farm_vol_samples: int
     farm_top_levels: int
+    farm_order_expiry_min_minutes: int
+    farm_order_expiry_max_minutes: int
     orderbook_retry_count: int
     orderbook_retry_sleep_sec: float
     markets_cursor_ttl_sec: int
@@ -143,6 +147,11 @@ def load_config() -> Config:
     resolutions_csv = _get_env_str("ALLOWED_RESOLUTIONS", "15")
     kinds_csv = _get_env_str("ALLOWED_KINDS", "UPDOWN")
     statuses_csv = _get_env_str("ALLOWED_STATUSES", "UNPAUSED,PRICE_PROPOSED")
+    farm_order_usd = _get_env_float("FARM_ORDER_USD", 5.0)
+    farm_order_usd_min = _get_env_optional("FARM_ORDER_USD_MIN")
+    farm_order_usd_max = _get_env_optional("FARM_ORDER_USD_MAX")
+    farm_expiry_min = _get_env_optional("FARM_ORDER_EXPIRY_MINUTES")
+    farm_expiry_max = _get_env_optional("FARM_ORDER_EXPIRY_MAX_MINUTES")
     return Config(
         budget_total_usd=_get_env_float("BUDGET_TOTAL_USD", 50.0),
         position_size_min_pct=_get_env_float("POSITION_SIZE_MIN_PCT", 0.10),
@@ -212,12 +221,24 @@ def load_config() -> Config:
         farm_min_hold_sec=_get_env_int("FARM_MIN_HOLD_SEC", 300),
         farm_min_volume_usd=_get_env_float("FARM_MIN_VOLUME_USD", 50000.0),
         farm_max_volume_usd=_get_env_float("FARM_MAX_VOLUME_USD", 150000.0),
-        farm_order_usd=_get_env_float("FARM_ORDER_USD", 5.0),
+        farm_order_usd=farm_order_usd,
+        farm_order_usd_min=float(farm_order_usd_min)
+        if farm_order_usd_min is not None
+        else farm_order_usd,
+        farm_order_usd_max=float(farm_order_usd_max)
+        if farm_order_usd_max is not None
+        else farm_order_usd,
         farm_max_open_markets=_get_env_int("FARM_MAX_OPEN_MARKETS", 3),
         farm_avoid_minutes=_get_env_int("FARM_AVOID_MINUTES", 15),
         farm_max_volatility=_get_env_float("FARM_MAX_VOLATILITY", 0.02),
         farm_vol_samples=_get_env_int("FARM_VOL_SAMPLES", 6),
         farm_top_levels=_get_env_int("FARM_TOP_LEVELS", 5),
+        farm_order_expiry_min_minutes=int(farm_expiry_min)
+        if farm_expiry_min is not None
+        else _get_env_int("ORDER_EXPIRY_MINUTES", 10),
+        farm_order_expiry_max_minutes=int(farm_expiry_max)
+        if farm_expiry_max is not None
+        else _get_env_int("ORDER_EXPIRY_MINUTES", 10),
         orderbook_retry_count=_get_env_int("ORDERBOOK_RETRY_COUNT", 2),
         orderbook_retry_sleep_sec=_get_env_float("ORDERBOOK_RETRY_SLEEP_SEC", 0.6),
         markets_cursor_ttl_sec=_get_env_int("MARKETS_CURSOR_TTL_SEC", 900),

@@ -110,6 +110,7 @@ class OrderService:
         decimal_precision: int,
         is_neg_risk: bool,
         is_yield_bearing: bool,
+        expiry_minutes: int | None = None,
     ) -> tuple[dict, int, int, str]:
         builder = self._get_builder()
         price_per_share = _round_price(price, decimal_precision)
@@ -135,7 +136,7 @@ class OrderService:
                 maker_amount=amounts.maker_amount,
                 taker_amount=amounts.taker_amount,
                 fee_rate_bps=fee_rate_bps,
-                expires_at=_expires_at(self._config.order_expiry_minutes),
+                expires_at=_expires_at(expiry_minutes or self._config.order_expiry_minutes),
             ),
         )
         typed_data = builder.build_typed_data(order, is_neg_risk=is_neg_risk, is_yield_bearing=is_yield_bearing)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from decimal import Decimal
 import math
+import random
 import time
 
 from .config import Config
@@ -214,6 +215,19 @@ class FarmEngine:
         bid_price, ask_price = prices
         placed = 0
         for side, price in (("buy", bid_price), ("sell", ask_price)):
+            size_usd = self._random_order_usd()
+            expiry_minutes = self._random_expiry_minutes()
+            if size_usd <= 0:
+                self._logger.log_reject(
+                    market.market_id,
+                    market.title,
+                    "farm_min_size",
+                    {
+                        "min_usd": self._config.farm_order_usd_min,
+                        "max_usd": self._config.farm_order_usd_max,
+                    },
+                )
+                continue
             existing = _find_state_order(self._state.get_farm_orders(), market.market_id, side)
             if existing:
                 open_entry = open_orders.get(existing.order_hash)
@@ -235,7 +249,7 @@ class FarmEngine:
             if side == "sell":
                 required_wei = self._orders.estimate_quantity_wei(
                     price,
-                    self._config.farm_order_usd,
+                    size_usd,
                     market.decimal_precision,
                 )
                 available_wei = token_balances.get(token_id, 0)
@@ -252,22 +266,32 @@ class FarmEngine:
                         market.market_id,
                         market.title,
                         "farm_no_inventory",
-                        {"available_wei": available_wei, "required_wei": required_wei},
+                        {
+                            "available_wei": available_wei,
+                            "required_wei": required_wei,
+                            "size_usd": size_usd,
+                        },
                     )
                     continue
-            if not self._has_budget():
-                self._logger.log_reject(market.market_id, market.title, "farm_budget", {})
+            if not self._has_budget(size_usd):
+                self._logger.log_reject(
+                    market.market_id,
+                    market.title,
+                    "farm_budget",
+                    {"size_usd": size_usd},
+                )
                 return placed
             try:
                 payload, quantity_wei, _, order_hash = self._orders.build_limit_order(
                     side=side,
                     token_id=token_id,
                     price=price,
-                    size_usd=self._config.farm_order_usd,
+                    size_usd=size_usd,
                     fee_rate_bps=market.fee_rate_bps,
                     decimal_precision=market.decimal_precision,
                     is_neg_risk=market.is_neg_risk,
                     is_yield_bearing=market.is_yield_bearing,
+                    expiry_minutes=expiry_minutes,
                 )
                 response = self._client.create_order(payload)
             except OrderServiceError as exc:
@@ -301,15 +325,43 @@ class FarmEngine:
                     "price": price,
                     "order_id": order_id,
                     "hash": order_hash,
+                    "size_usd": size_usd,
+                    "expiry_minutes": expiry_minutes,
                 },
             )
             placed += 1
         return placed
 
-    def _has_budget(self) -> bool:
+    def _has_budget(self, next_order_usd: float) -> bool:
         open_orders = self._state.list_farm_orders()
-        reserved = len(open_orders) * self._config.farm_order_usd
-        return reserved + self._config.farm_order_usd <= self._config.budget_total_usd
+        _, max_usd = self._order_size_range()
+        reserved = len(open_orders) * max_usd
+        return reserved + next_order_usd <= self._config.budget_total_usd
+
+    def _order_size_range(self) -> tuple[float, float]:
+        min_usd = max(0.0, self._config.farm_order_usd_min)
+        max_usd = max(min_usd, self._config.farm_order_usd_max)
+        return min_usd, max_usd
+
+    def _random_order_usd(self) -> float:
+        min_usd, max_usd = self._order_size_range()
+        if max_usd <= 0:
+            return 0.0
+        if min_usd == max_usd:
+            return round(min_usd, 2)
+        return round(random.uniform(min_usd, max_usd), 2)
+
+    def _random_expiry_minutes(self) -> int:
+        min_minutes = max(1, self._config.farm_order_expiry_min_minutes)
+        max_minutes = max(min_minutes, self._config.farm_order_expiry_max_minutes)
+        hold_minutes = max(1, math.ceil(self._config.farm_min_hold_sec / 60))
+        if min_minutes < hold_minutes:
+            min_minutes = hold_minutes
+        if max_minutes < min_minutes:
+            max_minutes = min_minutes
+        if min_minutes == max_minutes:
+            return min_minutes
+        return random.randint(min_minutes, max_minutes)
 
     def _enrich_market(self, market: Market) -> Market:
         if market.outcomes and market.decimal_precision > 0:

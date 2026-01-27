@@ -43,7 +43,9 @@ Farm settings (defaults in `.env.example`):
 - `FARM_MIN_SPREAD` / `FARM_MAX_SPREAD`: target bid/ask spread.
 - `FARM_MIN_HOLD_SEC`: minimum time an order stays live (>= 300s).
 - `FARM_MIN_VOLUME_USD` / `FARM_MAX_VOLUME_USD`: liquidity filter.
-- `FARM_ORDER_USD`: per-side order size.
+- `FARM_ORDER_USD`: per-side order size (used if min/max not set).
+- `FARM_ORDER_USD_MIN` / `FARM_ORDER_USD_MAX`: randomize per-order size.
+- `FARM_ORDER_EXPIRY_MINUTES` / `FARM_ORDER_EXPIRY_MAX_MINUTES`: randomize limit expiry.
 - `FARM_MAX_OPEN_MARKETS`: cap on markets farmed simultaneously.
 - `FARM_AVOID_MINUTES` / `FARM_MAX_VOLATILITY`: avoid high volatility near expiry.
 - `FARM_TOP_LEVELS`: ensure orders stay within top-5 levels.
