@@ -199,22 +199,22 @@ class FarmEngine:
         max_spread: float,
     ) -> int:
         market = self._enrich_market(market)
-        prices = _compute_bid_ask(
-            market,
-            min_spread,
-            max_spread,
-            self._config.farm_top_levels,
-        )
-        if prices is None:
-            self._logger.log_reject(market.market_id, market.title, "farm_no_prices", {})
-            return 0
-        token_id = _pick_yes_token_id(market)
-        if not token_id:
-            self._logger.log_reject(market.market_id, market.title, "farm_no_token", {})
-            return 0
-        bid_price, ask_price = prices
         placed = 0
-        for side, price in (("buy", bid_price), ("sell", ask_price)):
+        for side in ("buy", "sell"):
+            prices = _compute_bid_ask(
+                market,
+                min_spread,
+                max_spread,
+                self._config.farm_top_levels,
+            )
+            if prices is None:
+                self._logger.log_reject(market.market_id, market.title, "farm_no_prices", {})
+                return placed
+            price = prices[0] if side == "buy" else prices[1]
+            token_id = _pick_yes_token_id(market)
+            if not token_id:
+                self._logger.log_reject(market.market_id, market.title, "farm_no_token", {})
+                return placed
             size_usd = self._random_order_usd()
             expiry_minutes = self._random_expiry_minutes()
             if size_usd <= 0:
@@ -281,30 +281,93 @@ class FarmEngine:
                     {"size_usd": size_usd},
                 )
                 return placed
-            try:
-                payload, quantity_wei, _, order_hash = self._orders.build_limit_order(
-                    side=side,
-                    token_id=token_id,
-                    price=price,
-                    size_usd=size_usd,
-                    fee_rate_bps=market.fee_rate_bps,
-                    decimal_precision=market.decimal_precision,
-                    is_neg_risk=market.is_neg_risk,
-                    is_yield_bearing=market.is_yield_bearing,
-                    expiry_minutes=expiry_minutes,
-                )
-                response = self._client.create_order(payload)
-            except OrderServiceError as exc:
-                self._logger.log_reject(
-                    market.market_id,
-                    market.title,
-                    "farm_order_size",
-                    {"error": str(exc)},
-                )
+            retried = False
+            while True:
+                try:
+                    payload, quantity_wei, _, order_hash = self._orders.build_limit_order(
+                        side=side,
+                        token_id=token_id,
+                        price=price,
+                        size_usd=size_usd,
+                        fee_rate_bps=market.fee_rate_bps,
+                        decimal_precision=market.decimal_precision,
+                        is_neg_risk=market.is_neg_risk,
+                        is_yield_bearing=market.is_yield_bearing,
+                        expiry_minutes=expiry_minutes,
+                    )
+                    response = self._client.create_order(payload)
+                    break
+                except OrderServiceError as exc:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_order_size",
+                        {"error": str(exc)},
+                    )
+                    response = None
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    if not retried and _is_hash_mismatch(exc):
+                        retried = True
+                        refreshed = self._enrich_market(market, force=True)
+                        retry_prices = _compute_bid_ask(
+                            refreshed,
+                            min_spread,
+                            max_spread,
+                            self._config.farm_top_levels,
+                        )
+                        if not retry_prices:
+                            self._logger.log_reject(
+                                market.market_id, market.title, "farm_no_prices", {}
+                            )
+                            response = None
+                            break
+                        price = retry_prices[0] if side == "buy" else retry_prices[1]
+                        token_id = _pick_yes_token_id(refreshed)
+                        if not token_id:
+                            self._logger.log_reject(
+                                market.market_id, market.title, "farm_no_token", {}
+                            )
+                            response = None
+                            break
+                        if side == "sell":
+                            required_wei = self._orders.estimate_quantity_wei(
+                                price,
+                                size_usd,
+                                refreshed.decimal_precision,
+                            )
+                            available_wei = token_balances.get(token_id, 0)
+                            if required_wei <= 0:
+                                self._logger.log_reject(
+                                    market.market_id,
+                                    market.title,
+                                    "farm_min_size",
+                                    {
+                                        "price": price,
+                                        "size_usd": size_usd,
+                                    },
+                                )
+                                response = None
+                                break
+                            if available_wei < required_wei:
+                                self._logger.log_reject(
+                                    market.market_id,
+                                    market.title,
+                                    "farm_no_inventory",
+                                    {
+                                        "available_wei": available_wei,
+                                        "required_wei": required_wei,
+                                        "size_usd": size_usd,
+                                    },
+                                )
+                                response = None
+                                break
+                        market = refreshed
+                        continue
+                    self._logger.log_error("farm_place", str(exc))
+                    return placed
+            if response is None:
                 continue
-            except Exception as exc:  # noqa: BLE001
-                self._logger.log_error("farm_place", str(exc))
-                return placed
             order_id = _extract_order_id(response)
             farm_order = FarmOrder(
                 market_id=market.market_id,
@@ -363,8 +426,8 @@ class FarmEngine:
             return min_minutes
         return random.randint(min_minutes, max_minutes)
 
-    def _enrich_market(self, market: Market) -> Market:
-        if market.outcomes and market.decimal_precision > 0:
+    def _enrich_market(self, market: Market, force: bool = False) -> Market:
+        if not force and market.outcomes and market.decimal_precision > 0:
             return market
         try:
             details = self._client.get_market_details(market.market_id)
@@ -484,6 +547,11 @@ def _safe_float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _is_hash_mismatch(exc: Exception) -> bool:
+    message = str(exc)
+    return "order hash mismatch" in message.lower()
 
 
 def _parse_token_balances(payload: object) -> dict[str, int]:
