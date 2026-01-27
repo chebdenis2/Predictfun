@@ -120,6 +120,11 @@ class Config:
     orderbook_retry_count: int
     orderbook_retry_sleep_sec: float
     markets_cursor_ttl_sec: int
+    orderbook_source: str
+    ws_orderbook_url: str
+    ws_orderbook_snapshot_sec: float
+    ws_orderbook_max_topics: int
+    ws_orderbook_batch_sleep_sec: float
     model_k: float
     model_lookback_minutes: int
     spot_weight: float
@@ -213,6 +218,11 @@ def load_config() -> Config:
         orderbook_retry_count=_get_env_int("ORDERBOOK_RETRY_COUNT", 2),
         orderbook_retry_sleep_sec=_get_env_float("ORDERBOOK_RETRY_SLEEP_SEC", 0.6),
         markets_cursor_ttl_sec=_get_env_int("MARKETS_CURSOR_TTL_SEC", 900),
+        orderbook_source=_get_env_str("ORDERBOOK_SOURCE", "rest"),
+        ws_orderbook_url=_get_env_str("WS_ORDERBOOK_URL", "wss://ws.predict.fun/ws"),
+        ws_orderbook_snapshot_sec=_get_env_float("WS_ORDERBOOK_SNAPSHOT_SEC", 6.0),
+        ws_orderbook_max_topics=_get_env_int("WS_ORDERBOOK_MAX_TOPICS", 50),
+        ws_orderbook_batch_sleep_sec=_get_env_float("WS_ORDERBOOK_BATCH_SLEEP_SEC", 0.2),
         model_k=_get_env_float("MODEL_K", 10.0),
         model_lookback_minutes=_get_env_int("MODEL_LOOKBACK_MINUTES", 5),
         spot_weight=_get_env_float("SPOT_WEIGHT", 0.6),

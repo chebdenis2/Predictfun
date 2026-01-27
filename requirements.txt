@@ -1,2 +1,3 @@
 predict-sdk
 eth-account
+websocket-client

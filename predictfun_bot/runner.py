@@ -9,6 +9,7 @@ from .auth import AuthManager
 from .config import Config
 from .farm_engine import FarmEngine
 from .market_parser import apply_orderbook, apply_stats, build_market_base
+from .ws_orderbook import OrderbookWsClient
 from .models import Market, Position
 from .order_service import OrderService
 from .pnl import append_daily_report
@@ -39,6 +40,11 @@ class Runner:
         self._strategy = strategy
         self._orders = order_service
         self._farm = FarmEngine(config, predictfun_client, state, logger, order_service)
+        self._ws_orderbook = OrderbookWsClient(
+            config.ws_orderbook_url,
+            config.predictfun_api_key,
+            config.predictfun_timeout_sec,
+        )
 
     def _available_budget(self) -> float:
         open_total = sum(position.size_usd for position in self._state.get_open_positions())
@@ -101,6 +107,24 @@ class Runner:
                     "pnl_usd": pnl_usd,
                 },
             )
+
+    def _fetch_ws_orderbooks(self, market_ids: list[str]) -> dict[str, dict]:
+        if not market_ids:
+            return {}
+        max_topics = max(1, self._config.ws_orderbook_max_topics)
+        collected: dict[str, dict] = {}
+        for idx in range(0, len(market_ids), max_topics):
+            batch = market_ids[idx : idx + max_topics]
+            try:
+                orderbooks = self._ws_orderbook.fetch_orderbooks(
+                    batch, self._config.ws_orderbook_snapshot_sec
+                )
+                collected.update(orderbooks)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.log_error("orderbook_ws", str(exc))
+            if self._config.ws_orderbook_batch_sleep_sec > 0:
+                time.sleep(self._config.ws_orderbook_batch_sleep_sec)
+        return collected
 
     def _fetch_orderbook(self, market_id: str) -> dict | None:
         last_error = None
@@ -184,6 +208,7 @@ class Runner:
         spreads = []
         orderbook_latencies = []
         stats_latencies = []
+        bases: list[Market] = []
         for raw in raw_markets:
             if not isinstance(raw, dict):
                 continue
@@ -207,24 +232,50 @@ class Runner:
                     )
                 continue
             allowed += 1
-            ob_start = time.monotonic()
-            orderbook = self._fetch_orderbook(base.market_id)
-            if not orderbook:
-                continue
-            orderbook_latencies.append((time.monotonic() - ob_start) * 1000)
-            with_orderbook += 1
-            try:
-                st_start = time.monotonic()
-                stats = self._predictfun.get_market_stats(base.market_id)
-                stats_latencies.append((time.monotonic() - st_start) * 1000)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.log_error("market_stats", f"{base.market_id}: {exc}")
+            bases.append(base)
+
+        if self._config.orderbook_source.lower() == "ws":
+            orderbooks = self._fetch_ws_orderbooks([base.market_id for base in bases])
+            for base in bases:
+                orderbook = orderbooks.get(base.market_id)
+                if not orderbook:
+                    continue
+                with_orderbook += 1
+                market = apply_orderbook(base, orderbook)
+                if market.volume_usd <= 0:
+                    try:
+                        st_start = time.monotonic()
+                        stats = self._predictfun.get_market_stats(base.market_id)
+                        stats_latencies.append((time.monotonic() - st_start) * 1000)
+                    except Exception as exc:  # noqa: BLE001
+                        self._logger.log_error("market_stats", f"{base.market_id}: {exc}")
+                        stats = None
+                    market = apply_stats(market, stats)
+                if market.yes_ask is not None and market.yes_bid is not None:
+                    spreads.append(max(0.0, market.yes_ask - market.yes_bid))
+                markets.append(market)
+        else:
+            for base in bases:
+                ob_start = time.monotonic()
+                orderbook = self._fetch_orderbook(base.market_id)
+                if not orderbook:
+                    continue
+                orderbook_latencies.append((time.monotonic() - ob_start) * 1000)
+                with_orderbook += 1
                 stats = None
-            market = apply_orderbook(base, orderbook)
-            market = apply_stats(market, stats)
-            if market.yes_ask is not None and market.yes_bid is not None:
-                spreads.append(max(0.0, market.yes_ask - market.yes_bid))
-            markets.append(market)
+                if base.volume_usd <= 0:
+                    try:
+                        st_start = time.monotonic()
+                        stats = self._predictfun.get_market_stats(base.market_id)
+                        stats_latencies.append((time.monotonic() - st_start) * 1000)
+                    except Exception as exc:  # noqa: BLE001
+                        self._logger.log_error("market_stats", f"{base.market_id}: {exc}")
+                        stats = None
+                market = apply_orderbook(base, orderbook)
+                market = apply_stats(market, stats)
+                if market.yes_ask is not None and market.yes_bid is not None:
+                    spreads.append(max(0.0, market.yes_ask - market.yes_bid))
+                markets.append(market)
         self._log_info(
             "markets_loaded",
             {

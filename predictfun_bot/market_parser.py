@@ -31,6 +31,7 @@ def build_market_base(item: dict) -> Market:
     is_neg_risk = bool(item.get("isNegRisk"))
     is_yield_bearing = bool(item.get("isYieldBearing"))
     decimal_precision = int(item.get("decimalPrecision") or 2)
+    volume_usd = _parse_volume(item)
     return Market(
         market_id=market_id,
         symbol=symbol,
@@ -43,7 +44,7 @@ def build_market_base(item: dict) -> Market:
         no_bid=None,
         yes_asks=(),
         yes_bids=(),
-        volume_usd=0.0,
+        volume_usd=volume_usd,
         expiry_ts=expiry_ts,
         resolution_minutes=resolution_minutes,
         kind=kind,
@@ -103,6 +104,24 @@ def _parse_outcomes(raw: object) -> tuple[Outcome, ...]:
             if token_id:
                 outcomes.append(Outcome(name=name, index_set=index_set, token_id=token_id))
     return tuple(outcomes)
+
+
+def _parse_volume(item: dict) -> float:
+    stats = item.get("statistics")
+    if isinstance(stats, dict):
+        for key in ("volume24hUsd", "volumeTotalUsd", "totalLiquidityUsd"):
+            if key in stats and stats[key] is not None:
+                try:
+                    return float(stats[key])
+                except (TypeError, ValueError):
+                    continue
+    for key in ("volume24hUsd", "volumeTotalUsd", "totalLiquidityUsd", "volume_usd", "volumeUsd"):
+        if key in item and item[key] is not None:
+            try:
+                return float(item[key])
+            except (TypeError, ValueError):
+                continue
+    return 0.0
 
 
 def _parse_symbol(*texts: str) -> str:

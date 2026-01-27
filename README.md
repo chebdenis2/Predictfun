@@ -192,3 +192,12 @@ Orderbook reads can be retried automatically:
 ORDERBOOK_RETRY_COUNT=2
 ORDERBOOK_RETRY_SLEEP_SEC=0.6
 ```
+
+To use WebSocket orderbooks (recommended for farming points):
+```
+ORDERBOOK_SOURCE=ws
+WS_ORDERBOOK_URL=wss://ws.predict.fun/ws
+WS_ORDERBOOK_SNAPSHOT_SEC=6
+WS_ORDERBOOK_MAX_TOPICS=50
+WS_ORDERBOOK_BATCH_SLEEP_SEC=0.2
+```
