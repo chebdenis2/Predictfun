@@ -39,6 +39,8 @@ def build_market_base(item: dict) -> Market:
         yes_bid=None,
         no_ask=None,
         no_bid=None,
+        yes_asks=(),
+        yes_bids=(),
         volume_usd=0.0,
         expiry_ts=expiry_ts,
         resolution_minutes=resolution_minutes,
@@ -55,8 +57,8 @@ def build_market_base(item: dict) -> Market:
 def apply_orderbook(market: Market, orderbook: dict | None) -> Market:
     if not orderbook:
         return market
-    asks = orderbook.get("asks") or []
-    bids = orderbook.get("bids") or []
+    asks = tuple((float(price), float(size)) for price, size in (orderbook.get("asks") or [])[:5])
+    bids = tuple((float(price), float(size)) for price, size in (orderbook.get("bids") or [])[:5])
     yes_ask = asks[0][0] if asks else None
     yes_bid = bids[0][0] if bids else None
     no_ask = _complement_price(yes_bid, market.decimal_precision) if yes_bid is not None else None
@@ -67,6 +69,8 @@ def apply_orderbook(market: Market, orderbook: dict | None) -> Market:
         yes_bid=yes_bid,
         no_ask=no_ask,
         no_bid=no_bid,
+        yes_asks=asks,
+        yes_bids=bids,
     )
 
 

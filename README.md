@@ -31,6 +31,23 @@ required_edge = EDGE_THRESHOLD + (fee_rate_bps/10000)*FEE_EDGE_MULTIPLIER + spre
 If `p_model - p_market >= required_edge` the bot proposes a YES trade. If
 `p_market - p_model >= required_edge` it proposes a NO trade.
 
+## Strategy mode
+
+Set `STRATEGY_MODE` in `.env`:
+
+- `edge` (default): directional edge strategy.
+- `farm`: two-sided bid/ask farming strategy (see `prompt2.md`).
+
+Farm settings (defaults in `.env.example`):
+
+- `FARM_MIN_SPREAD` / `FARM_MAX_SPREAD`: target bid/ask spread.
+- `FARM_MIN_HOLD_SEC`: minimum time an order stays live (>= 300s).
+- `FARM_MIN_VOLUME_USD` / `FARM_MAX_VOLUME_USD`: liquidity filter.
+- `FARM_ORDER_USD`: per-side order size.
+- `FARM_MAX_OPEN_MARKETS`: cap on markets farmed simultaneously.
+- `FARM_AVOID_MINUTES` / `FARM_MAX_VOLATILITY`: avoid high volatility near expiry.
+- `FARM_TOP_LEVELS`: ensure orders stay within top-5 levels.
+
 ## Quick start
 
 1. Install dependencies:
@@ -102,6 +119,10 @@ To log every rejection reason:
 ```
 LOG_REJECTIONS=true
 ```
+
+For farming, the bot places **both bid and ask** within top-5 orderbook levels
+and keeps them open for at least `FARM_MIN_HOLD_SEC` seconds. It favors markets
+with 50-150k volume and avoids high volatility near expiry.
 
 ## Pricing model (orderbook)
 

@@ -21,6 +21,8 @@ class Market:
     yes_bid: float | None
     no_ask: float | None
     no_bid: float | None
+    yes_asks: tuple[tuple[float, float], ...]
+    yes_bids: tuple[tuple[float, float], ...]
     volume_usd: float
     expiry_ts: int
     resolution_minutes: int
@@ -73,3 +75,15 @@ class Position:
     is_neg_risk: bool
     is_yield_bearing: bool
     decimal_precision: int
+
+
+@dataclass(frozen=True)
+class FarmOrder:
+    market_id: str
+    side: str
+    order_id: str | None
+    order_hash: str
+    price: float
+    quantity_wei: int
+    placed_at_ts: int
+    status: str

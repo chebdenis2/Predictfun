@@ -192,6 +192,36 @@ class PredictFunClient:
     def create_order(self, payload: dict) -> object:
         return self._request_json("POST", self._orders_path, payload=payload, require_auth=True)
 
+    def list_orders(
+        self,
+        status: str | None = None,
+        after: str | None = None,
+        first: int | None = None,
+    ) -> tuple[list[dict], str | None]:
+        params: dict[str, str] = {}
+        if status:
+            params["status"] = status
+        if after:
+            params["after"] = str(after)
+        if first:
+            params["first"] = str(first)
+        if not params:
+            params = None
+        payload = self._request_json("GET", self._orders_path, params=params, require_auth=True)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Unexpected orders payload: {payload}")
+        if payload.get("success") is False:
+            raise RuntimeError(f"Predict.fun orders error: {payload}")
+        data = payload.get("data")
+        cursor = payload.get("cursor")
+        if not isinstance(data, list):
+            raise RuntimeError(f"Unexpected orders data: {payload}")
+        return data, cursor
+
+    def remove_orders(self, order_ids: list[str]) -> object:
+        payload = {"data": {"ids": order_ids}}
+        return self._request_json("POST", "/v1/orders/remove", payload=payload, require_auth=True)
+
     def list_positions(self) -> object:
         return self._request_json("GET", self._positions_path, require_auth=True)
 

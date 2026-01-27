@@ -7,6 +7,7 @@ from . import binance
 from .approvals import ApprovalManager
 from .auth import AuthManager
 from .config import Config
+from .farm_engine import FarmEngine
 from .market_parser import apply_orderbook, apply_stats, build_market_base
 from .models import Market, Position
 from .order_service import OrderService
@@ -37,6 +38,7 @@ class Runner:
         self._logger = logger
         self._strategy = strategy
         self._orders = order_service
+        self._farm = FarmEngine(config, predictfun_client, state, logger, order_service)
 
     def _available_budget(self) -> float:
         open_total = sum(position.size_usd for position in self._state.get_open_positions())
@@ -392,6 +394,16 @@ class Runner:
         )
         markets = self._load_markets()
         if not markets:
+            self._maybe_report_pnl()
+            return
+        if self._config.strategy_mode.lower() == "farm":
+            try:
+                self._auth.ensure_jwt()
+                self._orders.ensure_approvals()
+            except Exception as exc:  # noqa: BLE001
+                self._logger.log_error("farm_auth", str(exc))
+                return
+            self._farm.run_once(markets)
             self._maybe_report_pnl()
             return
         markets_by_id = {market.market_id: market for market in markets}

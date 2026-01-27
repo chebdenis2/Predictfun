@@ -101,6 +101,18 @@ class Config:
     max_spread: float
     min_expected_roi: float
     fee_edge_multiplier: float
+    strategy_mode: str
+    farm_min_spread: float
+    farm_max_spread: float
+    farm_min_hold_sec: int
+    farm_min_volume_usd: float
+    farm_max_volume_usd: float
+    farm_order_usd: float
+    farm_max_open_markets: int
+    farm_avoid_minutes: int
+    farm_max_volatility: float
+    farm_vol_samples: int
+    farm_top_levels: int
     model_k: float
     model_lookback_minutes: int
     spot_weight: float
@@ -173,6 +185,18 @@ def load_config() -> Config:
         max_spread=_get_env_float("MAX_SPREAD", 0.05),
         min_expected_roi=_get_env_float("MIN_EXPECTED_ROI", 0.02),
         fee_edge_multiplier=_get_env_float("FEE_EDGE_MULTIPLIER", 2.0),
+        strategy_mode=_get_env_str("STRATEGY_MODE", "edge"),
+        farm_min_spread=_get_env_float("FARM_MIN_SPREAD", 0.01),
+        farm_max_spread=_get_env_float("FARM_MAX_SPREAD", 0.02),
+        farm_min_hold_sec=_get_env_int("FARM_MIN_HOLD_SEC", 300),
+        farm_min_volume_usd=_get_env_float("FARM_MIN_VOLUME_USD", 50000.0),
+        farm_max_volume_usd=_get_env_float("FARM_MAX_VOLUME_USD", 150000.0),
+        farm_order_usd=_get_env_float("FARM_ORDER_USD", 5.0),
+        farm_max_open_markets=_get_env_int("FARM_MAX_OPEN_MARKETS", 3),
+        farm_avoid_minutes=_get_env_int("FARM_AVOID_MINUTES", 15),
+        farm_max_volatility=_get_env_float("FARM_MAX_VOLATILITY", 0.02),
+        farm_vol_samples=_get_env_int("FARM_VOL_SAMPLES", 6),
+        farm_top_levels=_get_env_int("FARM_TOP_LEVELS", 5),
         model_k=_get_env_float("MODEL_K", 10.0),
         model_lookback_minutes=_get_env_int("MODEL_LOOKBACK_MINUTES", 5),
         spot_weight=_get_env_float("SPOT_WEIGHT", 0.6),

@@ -92,6 +92,56 @@ class OrderService:
         )
         return payload, int(quantity_wei), int(amounts.price_per_share)
 
+    def build_limit_order(
+        self,
+        *,
+        side: str,
+        token_id: str,
+        price: float,
+        size_usd: float,
+        fee_rate_bps: int,
+        decimal_precision: int,
+        is_neg_risk: bool,
+        is_yield_bearing: bool,
+    ) -> tuple[dict, int, int, str]:
+        builder = self._get_builder()
+        price_per_share = _round_price(price, decimal_precision)
+        price_per_share_wei = _to_wei(price_per_share)
+        if price_per_share_wei <= 0:
+            raise OrderServiceError("Invalid price per share.")
+        quantity = size_usd / price_per_share if price_per_share > 0 else 0.0
+        quantity_wei = _to_wei(quantity)
+        amounts = builder.get_limit_order_amounts(
+            _limit_input(
+                side="buy" if side.lower() == "buy" else "sell",
+                price_per_share_wei=price_per_share_wei,
+                quantity_wei=quantity_wei,
+            )
+        )
+        order = builder.build_order(
+            "LIMIT",
+            _build_input(
+                side="buy" if side.lower() == "buy" else "sell",
+                token_id=token_id,
+                maker_amount=amounts.maker_amount,
+                taker_amount=amounts.taker_amount,
+                fee_rate_bps=fee_rate_bps,
+                expires_at=_expires_at(self._config.order_expiry_minutes),
+            ),
+        )
+        typed_data = builder.build_typed_data(order, is_neg_risk=is_neg_risk, is_yield_bearing=is_yield_bearing)
+        signed = builder.sign_typed_data_order(typed_data)
+        order_hash = builder.build_typed_data_hash(typed_data)
+        order_payload = _signed_order_payload(signed, order_hash)
+        payload = {
+            "data": {
+                "order": order_payload,
+                "pricePerShare": str(amounts.price_per_share),
+                "strategy": "LIMIT",
+            }
+        }
+        return payload, int(amounts.taker_amount), int(amounts.price_per_share), order_hash
+
     def _get_builder(self):
         if self._builder is not None:
             return self._builder

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 
-from .models import Position
+from .models import FarmOrder, Position
 
 
 class StateStore:
@@ -14,6 +14,8 @@ class StateStore:
             "seen_approvals": [],
             "last_report_date": None,
             "auth_jwt": None,
+            "farm_orders": {},
+            "market_history": {},
         }
         self._load()
 
@@ -29,6 +31,8 @@ class StateStore:
                 "seen_approvals": [],
                 "last_report_date": None,
                 "auth_jwt": None,
+                "farm_orders": {},
+                "market_history": {},
             }
 
     def _save(self) -> None:
@@ -108,3 +112,55 @@ class StateStore:
     def set_auth_jwt(self, token: str | None) -> None:
         self._state["auth_jwt"] = token
         self._save()
+
+    def get_farm_orders(self) -> dict:
+        return dict(self._state.get("farm_orders", {}))
+
+    def set_farm_order(self, market_id: str, side: str, order: FarmOrder) -> None:
+        self._state.setdefault("farm_orders", {}).setdefault(market_id, {})[side] = {
+            "market_id": order.market_id,
+            "side": order.side,
+            "order_id": order.order_id,
+            "order_hash": order.order_hash,
+            "price": order.price,
+            "quantity_wei": order.quantity_wei,
+            "placed_at_ts": order.placed_at_ts,
+            "status": order.status,
+        }
+        self._save()
+
+    def remove_farm_order(self, market_id: str, side: str) -> None:
+        bucket = self._state.get("farm_orders", {}).get(market_id, {})
+        if side in bucket:
+            bucket.pop(side, None)
+            if not bucket:
+                self._state.get("farm_orders", {}).pop(market_id, None)
+            self._save()
+
+    def list_farm_orders(self) -> list[FarmOrder]:
+        orders: list[FarmOrder] = []
+        for market_id, sides in self._state.get("farm_orders", {}).items():
+            for side, item in sides.items():
+                orders.append(
+                    FarmOrder(
+                        market_id=market_id,
+                        side=side,
+                        order_id=item.get("order_id"),
+                        order_hash=item.get("order_hash", ""),
+                        price=float(item.get("price", 0.0)),
+                        quantity_wei=int(item.get("quantity_wei", 0)),
+                        placed_at_ts=int(item.get("placed_at_ts", 0)),
+                        status=str(item.get("status", "")),
+                    )
+                )
+        return orders
+
+    def append_market_history(self, market_id: str, ts: int, mid_price: float, max_samples: int) -> None:
+        history = self._state.setdefault("market_history", {}).setdefault(market_id, [])
+        history.append({"ts": ts, "mid": mid_price})
+        if len(history) > max_samples:
+            history[:] = history[-max_samples:]
+        self._save()
+
+    def get_market_history(self, market_id: str) -> list[dict]:
+        return list(self._state.get("market_history", {}).get(market_id, []))
