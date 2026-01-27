@@ -105,15 +105,29 @@ class PredictFunClient:
         if variables:
             payload["variables"] = variables
         data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0",
+            "Origin": "https://predict.fun",
+            "Referer": "https://predict.fun/",
+        }
         request = urllib.request.Request(
             self._graphql_url,
             data=data,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
                 raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8")
+            except Exception:  # noqa: BLE001
+                body = ""
+            raise RuntimeError(f"Predict.fun GraphQL request failed: HTTP {exc.code}: {body}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Predict.fun GraphQL request failed: {exc}") from exc
         try:
