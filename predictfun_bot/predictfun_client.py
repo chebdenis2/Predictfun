@@ -175,16 +175,18 @@ class PredictFunClient:
         sleep_sec: float = 0.0,
         max_errors: int = 0,
         statuses: tuple[str, ...] | None = None,
-    ) -> list[dict]:
+        start_after: str | None = None,
+        return_cursor: bool = False,
+    ) -> list[dict] | tuple[list[dict], str | None]:
         markets: list[dict] = []
         seen_ids: set[str] = set()
-        cursor = None
+        cursor = start_after
         errors = 0
         status_list = tuple(statuses or ())
         if not status_list:
             status_list = (None,)
         for status in status_list:
-            cursor = None
+            cursor = start_after if status == status_list[0] else None
             for _ in range(max_pages):
                 try:
                     data, cursor = self.list_markets(cursor, page_size, status)
@@ -209,6 +211,8 @@ class PredictFunClient:
                         break
                     if sleep_sec > 0:
                         time.sleep(sleep_sec)
+        if return_cursor:
+            return markets, cursor
         return markets
 
     def list_markets_graphql(
@@ -252,9 +256,11 @@ class PredictFunClient:
         page_size: int | None = None,
         sleep_sec: float = 0.0,
         is_resolved: bool | None = None,
-    ) -> list[dict]:
+        start_after: str | None = None,
+        return_cursor: bool = False,
+    ) -> list[dict] | tuple[list[dict], str | None]:
         markets: list[dict] = []
-        cursor = None
+        cursor = start_after
         for _ in range(max_pages):
             items, cursor, has_next = self.list_markets_graphql(cursor, page_size, is_resolved)
             markets.extend(items)
@@ -262,6 +268,8 @@ class PredictFunClient:
                 break
             if sleep_sec > 0:
                 time.sleep(sleep_sec)
+        if return_cursor:
+            return markets, cursor
         return markets
 
     def get_market_details(self, market_id: str) -> dict:

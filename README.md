@@ -180,3 +180,15 @@ PREDICTFUN_MARKETS_SOURCE=graphql
 PREDICTFUN_GRAPHQL_URL=https://graphql.predict.fun/graphql
 PREDICTFUN_GRAPHQL_IS_RESOLVED=false
 ```
+
+The bot caches the last pagination cursor to avoid scanning the entire archive
+every loop. Control this with:
+```
+MARKETS_CURSOR_TTL_SEC=900
+```
+
+Orderbook reads can be retried automatically:
+```
+ORDERBOOK_RETRY_COUNT=2
+ORDERBOOK_RETRY_SLEEP_SEC=0.6
+```

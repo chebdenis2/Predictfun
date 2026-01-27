@@ -102,24 +102,55 @@ class Runner:
                 },
             )
 
+    def _fetch_orderbook(self, market_id: str) -> dict | None:
+        last_error = None
+        retries = max(0, self._config.orderbook_retry_count)
+        for attempt in range(retries + 1):
+            try:
+                return self._predictfun.get_orderbook(market_id)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt >= retries:
+                    break
+                time.sleep(self._config.orderbook_retry_sleep_sec)
+        if last_error:
+            self._logger.log_error("orderbook", f"{market_id}: {last_error}")
+        return None
+
     def _load_markets(self) -> list[Market]:
         try:
             start = time.monotonic()
             if self._config.predictfun_markets_source.lower() == "graphql":
-                raw_markets = self._predictfun.get_all_markets_graphql(
+                cursor = self._state.get_markets_cursor(
+                    "graphql", self._config.markets_cursor_ttl_sec
+                )
+                result = self._predictfun.get_all_markets_graphql(
                     self._config.predictfun_max_pages,
                     self._config.predictfun_markets_page_size,
                     self._config.predictfun_page_sleep_sec,
                     self._config.predictfun_graphql_is_resolved,
+                    cursor,
+                    True,
                 )
+                raw_markets, end_cursor = result
+                if end_cursor:
+                    self._state.set_markets_cursor("graphql", end_cursor)
             else:
-                raw_markets = self._predictfun.get_all_markets(
+                cursor = self._state.get_markets_cursor(
+                    "rest", self._config.markets_cursor_ttl_sec
+                )
+                result = self._predictfun.get_all_markets(
                     self._config.predictfun_max_pages,
                     self._config.predictfun_markets_page_size,
                     self._config.predictfun_page_sleep_sec,
                     self._config.predictfun_max_page_errors,
                     self._config.predictfun_markets_statuses,
+                    cursor,
+                    True,
                 )
+                raw_markets, end_cursor = result
+                if end_cursor:
+                    self._state.set_markets_cursor("rest", end_cursor)
             markets_latency_ms = (time.monotonic() - start) * 1000
         except Exception as exc:  # noqa: BLE001
             self._logger.log_error("list_markets", str(exc))
@@ -155,13 +186,11 @@ class Runner:
                     )
                 continue
             allowed += 1
-            try:
-                ob_start = time.monotonic()
-                orderbook = self._predictfun.get_orderbook(base.market_id)
-                orderbook_latencies.append((time.monotonic() - ob_start) * 1000)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.log_error("orderbook", f"{base.market_id}: {exc}")
+            ob_start = time.monotonic()
+            orderbook = self._fetch_orderbook(base.market_id)
+            if not orderbook:
                 continue
+            orderbook_latencies.append((time.monotonic() - ob_start) * 1000)
             with_orderbook += 1
             try:
                 st_start = time.monotonic()

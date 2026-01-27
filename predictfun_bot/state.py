@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 from .models import FarmOrder, Position
 
@@ -16,6 +17,7 @@ class StateStore:
             "auth_jwt": None,
             "farm_orders": {},
             "market_history": {},
+            "markets_cursors": {},
         }
         self._load()
 
@@ -33,6 +35,7 @@ class StateStore:
                 "auth_jwt": None,
                 "farm_orders": {},
                 "market_history": {},
+                "markets_cursors": {},
             }
 
     def _save(self) -> None:
@@ -164,3 +167,22 @@ class StateStore:
 
     def get_market_history(self, market_id: str) -> list[dict]:
         return list(self._state.get("market_history", {}).get(market_id, []))
+
+    def get_markets_cursor(self, source: str, ttl_sec: int | None = None) -> str | None:
+        record = self._state.get("markets_cursors", {}).get(source)
+        if not isinstance(record, dict):
+            return None
+        cursor = record.get("cursor")
+        ts = record.get("ts")
+        if ttl_sec and ts and int(time.time()) - int(ts) > ttl_sec:
+            return None
+        return cursor
+
+    def set_markets_cursor(self, source: str, cursor: str | None) -> None:
+        if not cursor:
+            return
+        self._state.setdefault("markets_cursors", {})[source] = {
+            "cursor": cursor,
+            "ts": int(time.time()),
+        }
+        self._save()
