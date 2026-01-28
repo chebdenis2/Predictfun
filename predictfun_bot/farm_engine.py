@@ -9,6 +9,7 @@ import time
 from .config import Config
 from .market_parser import build_market_base
 from .models import FarmOrder, Market
+from .auth import AuthManager
 from .order_service import OrderService, OrderServiceError
 from .predictfun_client import PredictFunClient
 from .state import StateStore
@@ -23,12 +24,14 @@ class FarmEngine:
         state: StateStore,
         logger: TradeLogger,
         orders: OrderService,
+        auth: AuthManager,
     ) -> None:
         self._config = config
         self._client = client
         self._state = state
         self._logger = logger
         self._orders = orders
+        self._auth = auth
 
     def run_once(self, markets: list[Market]) -> None:
         now_ts = int(time.time())
@@ -69,8 +72,16 @@ class FarmEngine:
         try:
             orders, _ = self._client.list_orders(status="OPEN", first=100)
         except Exception as exc:  # noqa: BLE001
-            self._logger.log_error("list_orders", str(exc))
-            return {}
+            if _is_invalid_jwt(exc):
+                try:
+                    self._auth.ensure_jwt(force_refresh=True)
+                    orders, _ = self._client.list_orders(status="OPEN", first=100)
+                except Exception as refresh_exc:  # noqa: BLE001
+                    self._logger.log_error("farm_auth_refresh", str(refresh_exc))
+                    return {}
+            else:
+                self._logger.log_error("list_orders", str(exc))
+                return {}
         mapping: dict[str, dict] = {}
         for item in orders:
             if not isinstance(item, dict):
@@ -85,8 +96,16 @@ class FarmEngine:
         try:
             payload = self._client.list_positions()
         except Exception as exc:  # noqa: BLE001
-            self._logger.log_error("list_positions", str(exc))
-            return {}
+            if _is_invalid_jwt(exc):
+                try:
+                    self._auth.ensure_jwt(force_refresh=True)
+                    payload = self._client.list_positions()
+                except Exception as refresh_exc:  # noqa: BLE001
+                    self._logger.log_error("farm_auth_refresh", str(refresh_exc))
+                    return {}
+            else:
+                self._logger.log_error("list_positions", str(exc))
+                return {}
         return _parse_token_balances(payload)
 
     def _sync_orders(self, open_orders: dict[str, dict], now_ts: int) -> None:
@@ -341,7 +360,7 @@ class FarmEngine:
                         is_yield_bearing=market.is_yield_bearing,
                         expiry_minutes=expiry_minutes,
                     )
-                    response = self._client.create_order(payload)
+                    response = self._create_order_with_jwt_retry(payload)
                     break
                 except OrderServiceError as exc:
                     self._logger.log_reject(
@@ -490,6 +509,19 @@ class FarmEngine:
             outcomes=enriched.outcomes,
         )
 
+    def _create_order_with_jwt_retry(self, payload: dict) -> object:
+        try:
+            return self._client.create_order(payload)
+        except Exception as exc:  # noqa: BLE001
+            if not _is_invalid_jwt(exc):
+                raise
+            try:
+                self._auth.ensure_jwt(force_refresh=True)
+            except Exception as refresh_exc:  # noqa: BLE001
+                self._logger.log_error("farm_auth_refresh", str(refresh_exc))
+                raise
+            return self._client.create_order(payload)
+
 
 def _mid_price(market: Market) -> float | None:
     if market.yes_bid is None or market.yes_ask is None:
@@ -605,6 +637,11 @@ def _inventory_usd(inventory_wei: int, price: float) -> float:
 def _is_hash_mismatch(exc: Exception) -> bool:
     message = str(exc)
     return "order hash mismatch" in message.lower()
+
+
+def _is_invalid_jwt(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "invalid jwt" in message or "http 401" in message
 
 
 def _parse_token_balances(payload: object) -> dict[str, int]:

@@ -39,7 +39,7 @@ class Runner:
         self._logger = logger
         self._strategy = strategy
         self._orders = order_service
-        self._farm = FarmEngine(config, predictfun_client, state, logger, order_service)
+        self._farm = FarmEngine(config, predictfun_client, state, logger, order_service, auth)
         self._ws_orderbook = OrderbookWsClient(
             config.ws_orderbook_url,
             config.predictfun_api_key,
@@ -338,7 +338,7 @@ class Runner:
                 self._auth.ensure_jwt()
                 self._orders.ensure_approvals()
                 payload, _, _ = self._orders.build_exit_order(position, current_price)
-                self._predictfun.create_order(payload)
+                self._create_order_with_jwt_retry(payload, "exit_order")
                 self._logger.log_close(
                     position.trade_id,
                     position.market_id,
@@ -464,7 +464,7 @@ class Runner:
                 self._auth.ensure_jwt()
                 self._orders.ensure_approvals()
                 payload, quantity_wei, _ = self._orders.build_entry_order(candidate, size_usd)
-                self._predictfun.create_order(payload)
+                self._create_order_with_jwt_retry(payload, "entry_order")
                 self._logger.log_open(
                     candidate.trade_id,
                     candidate.market_id,
@@ -557,9 +557,28 @@ class Runner:
             self.run_once()
             time.sleep(self._config.poll_interval_sec)
 
+    def _create_order_with_jwt_retry(self, payload: dict, context: str) -> object:
+        try:
+            return self._predictfun.create_order(payload)
+        except Exception as exc:  # noqa: BLE001
+            if not _is_invalid_jwt(exc):
+                raise
+            try:
+                self._auth.ensure_jwt(force_refresh=True)
+            except Exception as refresh_exc:  # noqa: BLE001
+                self._logger.log_error("auth_refresh", str(refresh_exc))
+                raise
+            self._logger.log_info("auth_refresh", {"context": context})
+            return self._predictfun.create_order(payload)
+
 
 def _estimate_quantity_wei(price: float, size_usd: float) -> int:
     if price <= 0:
         return 0
     quantity = size_usd / price
     return int(quantity * 1_000_000_000_000_000_000)
+
+
+def _is_invalid_jwt(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "invalid jwt" in message or "http 401" in message
