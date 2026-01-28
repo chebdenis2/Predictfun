@@ -114,6 +114,8 @@ class Config:
     farm_order_usd: float
     farm_order_usd_min: float
     farm_order_usd_max: float
+    farm_max_inventory_usd: float
+    farm_allow_position_add: bool
     farm_max_open_markets: int
     farm_avoid_minutes: int
     farm_max_volatility: float
@@ -150,6 +152,7 @@ def load_config() -> Config:
     farm_order_usd = _get_env_float("FARM_ORDER_USD", 5.0)
     farm_order_usd_min = _get_env_optional("FARM_ORDER_USD_MIN")
     farm_order_usd_max = _get_env_optional("FARM_ORDER_USD_MAX")
+    farm_max_inventory_usd = _get_env_optional("FARM_MAX_INVENTORY_USD")
     farm_expiry_min = _get_env_optional("FARM_ORDER_EXPIRY_MINUTES")
     farm_expiry_max = _get_env_optional("FARM_ORDER_EXPIRY_MAX_MINUTES")
     return Config(
@@ -228,6 +231,14 @@ def load_config() -> Config:
         farm_order_usd_max=float(farm_order_usd_max)
         if farm_order_usd_max is not None
         else farm_order_usd,
+        farm_max_inventory_usd=float(farm_max_inventory_usd)
+        if farm_max_inventory_usd is not None
+        else (
+            float(farm_order_usd_max)
+            if farm_order_usd_max is not None
+            else farm_order_usd
+        ),
+        farm_allow_position_add=_get_env_bool("FARM_ALLOW_POSITION_ADD", False),
         farm_max_open_markets=_get_env_int("FARM_MAX_OPEN_MARKETS", 3),
         farm_avoid_minutes=_get_env_int("FARM_AVOID_MINUTES", 15),
         farm_max_volatility=_get_env_float("FARM_MAX_VOLATILITY", 0.02),

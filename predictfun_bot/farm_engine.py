@@ -228,6 +228,41 @@ class FarmEngine:
                     },
                 )
                 continue
+            inventory_wei = token_balances.get(token_id, 0)
+            if side == "buy":
+                if inventory_wei > 0 and not self._config.farm_allow_position_add:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_position_open",
+                        {"inventory_wei": inventory_wei},
+                    )
+                    continue
+                if self._config.farm_allow_position_add and inventory_wei > 0:
+                    inventory_usd = _inventory_usd(inventory_wei, price)
+                    if inventory_usd >= self._config.farm_max_inventory_usd:
+                        self._logger.log_reject(
+                            market.market_id,
+                            market.title,
+                            "farm_inventory_limit",
+                            {
+                                "inventory_usd": inventory_usd,
+                                "max_usd": self._config.farm_max_inventory_usd,
+                            },
+                        )
+                        continue
+                    if inventory_usd + size_usd > self._config.farm_max_inventory_usd:
+                        self._logger.log_reject(
+                            market.market_id,
+                            market.title,
+                            "farm_inventory_limit",
+                            {
+                                "inventory_usd": inventory_usd,
+                                "max_usd": self._config.farm_max_inventory_usd,
+                                "size_usd": size_usd,
+                            },
+                        )
+                        continue
             existing = _find_state_order(self._state.get_farm_orders(), market.market_id, side)
             if existing:
                 open_entry = open_orders.get(existing.order_hash)
@@ -247,12 +282,23 @@ class FarmEngine:
                         continue
                 self._state.remove_farm_order(market.market_id, side)
             if side == "sell":
+                available_wei = inventory_wei
+                inventory_usd = _inventory_usd(available_wei, price)
+                if inventory_usd <= 0:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_no_inventory",
+                        {"available_wei": available_wei},
+                    )
+                    continue
+                if inventory_usd < size_usd:
+                    size_usd = round(inventory_usd, 2)
                 required_wei = self._orders.estimate_quantity_wei(
                     price,
                     size_usd,
                     market.decimal_precision,
                 )
-                available_wei = token_balances.get(token_id, 0)
                 if required_wei <= 0:
                     self._logger.log_reject(
                         market.market_id,
@@ -273,7 +319,7 @@ class FarmEngine:
                         },
                     )
                     continue
-            if not self._has_budget(size_usd):
+            if side == "buy" and not self._has_budget(size_usd):
                 self._logger.log_reject(
                     market.market_id,
                     market.title,
@@ -547,6 +593,13 @@ def _safe_float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _inventory_usd(inventory_wei: int, price: float) -> float:
+    if inventory_wei <= 0 or price <= 0:
+        return 0.0
+    shares = Decimal(inventory_wei) / Decimal("1e18")
+    return float(shares * Decimal(str(price)))
 
 
 def _is_hash_mismatch(exc: Exception) -> bool:

@@ -45,6 +45,8 @@ Farm settings (defaults in `.env.example`):
 - `FARM_MIN_VOLUME_USD` / `FARM_MAX_VOLUME_USD`: liquidity filter.
 - `FARM_ORDER_USD`: per-side order size (used if min/max not set).
 - `FARM_ORDER_USD_MIN` / `FARM_ORDER_USD_MAX`: randomize per-order size.
+- `FARM_MAX_INVENTORY_USD`: cap on per-market inventory (USD).
+- `FARM_ALLOW_POSITION_ADD`: allow adding to an existing position (default false).
 - `FARM_ORDER_EXPIRY_MINUTES` / `FARM_ORDER_EXPIRY_MAX_MINUTES`: randomize limit expiry.
 - `FARM_MAX_OPEN_MARKETS`: cap on markets farmed simultaneously.
 - `FARM_AVOID_MINUTES` / `FARM_MAX_VOLATILITY`: avoid high volatility near expiry.
