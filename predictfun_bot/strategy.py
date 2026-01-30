@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import time
+import uuid
+
+from .config import Config
+from .models import Market, Position, TradeCandidate
+
+
+class Strategy:
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    @staticmethod
+    def _clamp(value: float) -> float:
+        if value < 0.0:
+            return 0.0
+        if value > 1.0:
+            return 1.0
+        return value
+
+    def _spot_probability(self, spot: float, strike: float) -> float:
+        if strike <= 0:
+            return 0.5
+        diff = (spot - strike) / strike
+        raw = 0.5 + (self._config.spot_sensitivity * diff)
+        return self._clamp(raw)
+
+    def _blend_probability(self, momentum: float | None, spot: float | None) -> float | None:
+        if momentum is None and spot is None:
+            return None
+        if spot is None:
+            return momentum
+        if momentum is None:
+            return spot
+        weight = self._config.spot_weight
+        if weight < 0.0:
+            weight = 0.0
+        if weight > 1.0:
+            weight = 1.0
+        return self._clamp((weight * spot) + ((1.0 - weight) * momentum))
+
+    def is_allowed_market(self, market: Market) -> bool:
+        mode = self._config.strategy_mode.lower()
+        if mode == "farm":
+            if not self._is_allowed_kind(market.kind):
+                return False
+            if not self._is_allowed_status(market.status):
+                return False
+            return True
+        if not self._is_allowed_symbol(market.symbol):
+            return False
+        if not self._is_allowed_resolution(market.resolution_minutes):
+            return False
+        if not self._is_allowed_kind(market.kind):
+            return False
+        if not self._is_allowed_status(market.status):
+            return False
+        return True
+
+    def _is_allowed_symbol(self, symbol: str) -> bool:
+        if not symbol:
+            return False
+        allowed = {item.lower() for item in self._config.allowed_symbols}
+        if not allowed:
+            return True
+        if "*" in allowed or "all" in allowed:
+            return True
+        return symbol.lower() in allowed
+
+    def _is_allowed_resolution(self, resolution: int) -> bool:
+        if resolution <= 0:
+            return False
+        allowed = set(self._config.allowed_resolution_minutes)
+        if not allowed or 0 in allowed:
+            return True
+        return resolution in allowed
+
+    def _is_allowed_kind(self, kind: str) -> bool:
+        if not kind:
+            return True
+        allowed = {item.lower() for item in self._config.allowed_kinds}
+        if not allowed or "*" in allowed or "all" in allowed:
+            return True
+        return kind.lower() in allowed
+
+    def _is_allowed_status(self, status: str) -> bool:
+        if not status:
+            return True
+        allowed = {item.lower() for item in self._config.allowed_statuses}
+        if not allowed or "*" in allowed or "all" in allowed:
+            return True
+        return status.lower() in allowed
+
+    def find_candidates(
+        self,
+        markets: list[Market],
+        momentum_probability_by_symbol: dict[str, float],
+        spot_by_symbol: dict[str, float],
+        now_ts: int | None = None,
+    ) -> list[TradeCandidate]:
+        candidates: list[TradeCandidate] = []
+        now_ts = now_ts or int(time.time())
+        for market in markets:
+            candidate, _, _ = self.evaluate_market(
+                market,
+                momentum_probability_by_symbol,
+                spot_by_symbol,
+                now_ts=now_ts,
+            )
+            if candidate:
+                candidates.append(candidate)
+        candidates.sort(key=lambda item: item.edge, reverse=True)
+        return candidates
+
+    def evaluate_market(
+        self,
+        market: Market,
+        momentum_probability_by_symbol: dict[str, float],
+        spot_by_symbol: dict[str, float],
+        now_ts: int | None = None,
+    ) -> tuple[TradeCandidate | None, str, dict]:
+        now_ts = now_ts or int(time.time())
+        if not self.is_allowed_market(market):
+            return None, "not_allowed", {
+                "status": market.status,
+                "kind": market.kind,
+                "symbol": market.symbol,
+                "resolution": market.resolution_minutes,
+            }
+        if market.expiry_ts:
+            minutes_to_expiry = (market.expiry_ts - now_ts) / 60
+            if minutes_to_expiry > self._config.max_time_to_expiry_minutes:
+                return None, "expiry_too_far", {"minutes": minutes_to_expiry}
+            if minutes_to_expiry < self._config.min_time_to_expiry_minutes:
+                return None, "expiry_too_close", {"minutes": minutes_to_expiry}
+        if market.volume_usd < self._config.min_volume_usd:
+            return None, "low_volume", {"volume_usd": market.volume_usd}
+        if market.yes_ask is None or market.no_ask is None:
+            return None, "missing_orderbook", {}
+        p_momentum = momentum_probability_by_symbol.get(market.symbol)
+        spot_price = spot_by_symbol.get(market.symbol)
+        p_spot = None
+        if spot_price is not None and market.strike_price is not None:
+            p_spot = self._spot_probability(spot_price, market.strike_price)
+        p_model = self._blend_probability(p_momentum, p_spot)
+        if p_model is None:
+            return None, "missing_model", {"momentum": p_momentum, "spot": p_spot}
+        spread = None
+        if market.yes_bid is not None and market.yes_ask is not None:
+            spread = market.yes_ask - market.yes_bid
+            if spread < 0:
+                spread = 0.0
+        if spread is not None and spread > self._config.max_spread:
+            return None, "spread_too_high", {"spread": spread, "max_spread": self._config.max_spread}
+        p_market = market.yes_ask
+        edge_yes = p_model - p_market
+        edge_no = p_market - p_model
+        fee_cost = (market.fee_rate_bps / 10000.0) * self._config.fee_edge_multiplier
+        required_edge = self._config.edge_threshold + fee_cost
+        if spread is not None:
+            required_edge += spread / 2
+        if edge_yes >= required_edge:
+            side = "YES"
+            price = market.yes_ask
+            edge = edge_yes
+        elif edge_no >= required_edge:
+            side = "NO"
+            price = market.no_ask
+            edge = edge_no
+        else:
+            return None, "edge_too_low", {
+                "edge_yes": edge_yes,
+                "edge_no": edge_no,
+                "required_edge": required_edge,
+                "p_market": p_market,
+                "p_model": p_model,
+                "fee_cost": fee_cost,
+                "spread": spread,
+            }
+        if price <= 0:
+            return None, "invalid_price", {"price": price}
+        token_id = self._pick_token_id(market, side)
+        if not token_id:
+            return None, "missing_token_id", {"side": side}
+        effective_edge = edge - fee_cost - (spread / 2 if spread is not None else 0.0)
+        expected_roi = effective_edge / price
+        if expected_roi < self._config.min_expected_roi:
+            return None, "roi_too_low", {
+                "expected_roi": expected_roi,
+                "min_expected_roi": self._config.min_expected_roi,
+            }
+        trade_id = uuid.uuid4().hex[:8]
+        return (
+            TradeCandidate(
+                trade_id=trade_id,
+                market_id=market.market_id,
+                symbol=market.symbol,
+                side=side,
+                token_id=token_id,
+                price=price,
+                spread=spread,
+                p_market=p_market,
+                p_model=p_model,
+                edge=edge,
+                required_edge=required_edge,
+                effective_edge=effective_edge,
+                expected_roi=expected_roi,
+                volume_usd=market.volume_usd,
+                expiry_ts=market.expiry_ts,
+                fee_rate_bps=market.fee_rate_bps,
+                is_neg_risk=market.is_neg_risk,
+                is_yield_bearing=market.is_yield_bearing,
+                decimal_precision=market.decimal_precision,
+            ),
+            "",
+            {},
+        )
+
+    def should_exit(
+        self,
+        position: Position,
+        market: Market,
+        now_ts: int | None = None,
+    ) -> tuple[bool, str, float]:
+        now_ts = now_ts or int(time.time())
+        minutes_to_expiry = (market.expiry_ts - now_ts) / 60 if market.expiry_ts else None
+        current_price = market.yes_bid if position.side == "YES" else market.no_bid
+        if current_price is None or current_price <= 0 or position.entry_price <= 0:
+            return True, "invalid_price", current_price
+        roi = (current_price - position.entry_price) / position.entry_price
+        if roi >= self._config.take_profit_pct:
+            return True, "take_profit", current_price
+        if roi <= -self._config.stop_loss_pct:
+            return True, "stop_loss", current_price
+        if minutes_to_expiry is not None and minutes_to_expiry <= self._config.exit_before_expiry_minutes:
+            return True, "expiry", current_price
+        return False, "", current_price
+
+    @staticmethod
+    def _pick_token_id(market: Market, side: str) -> str:
+        normalized = side.lower()
+        targets = ("yes", "up") if normalized == "yes" else ("no", "down")
+        for outcome in market.outcomes:
+            if outcome.name.lower() in targets:
+                return outcome.token_id
+        return ""
