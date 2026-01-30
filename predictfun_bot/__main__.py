@@ -32,6 +32,9 @@ def _build_runner() -> Runner:
         config.predictfun_auth_header,
         config.predictfun_jwt,
         config.predictfun_graphql_url,
+        config.predictfun_graphql_timeout_sec,
+        config.predictfun_graphql_retry_count,
+        config.predictfun_graphql_retry_sleep_sec,
     )
     state = StateStore(config.state_path)
     auth = AuthManager(config, client, state)

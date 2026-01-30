@@ -63,6 +63,13 @@ ALLOWED_RESOLUTIONS=
 The farm mode ignores symbol/resolution filters and only applies status/kind +
 liquidity/volatility constraints.
 
+If GraphQL requests are flaky, you can tune:
+```
+PREDICTFUN_GRAPHQL_TIMEOUT_SEC=8
+PREDICTFUN_GRAPHQL_RETRY_COUNT=2
+PREDICTFUN_GRAPHQL_RETRY_SLEEP_SEC=0.7
+```
+
 ## Quick start
 
 1. Install dependencies:

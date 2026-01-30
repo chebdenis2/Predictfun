@@ -25,6 +25,9 @@ class PredictFunClient:
         auth_header: str,
         jwt_token: str | None = None,
         graphql_url: str | None = None,
+        graphql_timeout_sec: int | None = None,
+        graphql_retry_count: int = 0,
+        graphql_retry_sleep_sec: float = 0.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._markets_path = markets_path
@@ -41,6 +44,9 @@ class PredictFunClient:
         self._auth_header = auth_header
         self._jwt_token = jwt_token
         self._graphql_url = graphql_url
+        self._graphql_timeout_sec = graphql_timeout_sec or timeout_sec
+        self._graphql_retry_count = max(0, graphql_retry_count)
+        self._graphql_retry_sleep_sec = max(0.0, graphql_retry_sleep_sec)
 
     def set_jwt(self, token: str | None) -> None:
         self._jwt_token = token
@@ -123,18 +129,35 @@ class PredictFunClient:
             headers=headers,
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            body = ""
+        raw = None
+        for attempt in range(self._graphql_retry_count + 1):
             try:
-                body = exc.read().decode("utf-8")
-            except Exception:  # noqa: BLE001
+                with urllib.request.urlopen(
+                    request, timeout=self._graphql_timeout_sec
+                ) as response:
+                    raw = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
                 body = ""
-            raise RuntimeError(f"Predict.fun GraphQL request failed: HTTP {exc.code}: {body}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Predict.fun GraphQL request failed: {exc}") from exc
+                try:
+                    body = exc.read().decode("utf-8")
+                except Exception:  # noqa: BLE001
+                    body = ""
+                if exc.code in {429, 500, 502, 503, 504} and attempt < self._graphql_retry_count:
+                    if self._graphql_retry_sleep_sec > 0:
+                        time.sleep(self._graphql_retry_sleep_sec)
+                    continue
+                raise RuntimeError(
+                    f"Predict.fun GraphQL request failed: HTTP {exc.code}: {body}"
+                ) from exc
+            except urllib.error.URLError as exc:
+                if attempt < self._graphql_retry_count:
+                    if self._graphql_retry_sleep_sec > 0:
+                        time.sleep(self._graphql_retry_sleep_sec)
+                    continue
+                raise RuntimeError(f"Predict.fun GraphQL request failed: {exc}") from exc
+        if raw is None:
+            raise RuntimeError("Predict.fun GraphQL request failed: empty response")
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as exc:

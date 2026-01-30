@@ -79,6 +79,9 @@ class Config:
     predictfun_markets_source: str
     predictfun_graphql_url: str
     predictfun_graphql_is_resolved: bool
+    predictfun_graphql_timeout_sec: int
+    predictfun_graphql_retry_count: int
+    predictfun_graphql_retry_sleep_sec: float
     predictfun_timeout_sec: int
     predictfun_api_key: str | None
     predictfun_api_key_header: str
@@ -194,6 +197,9 @@ def load_config() -> Config:
             "PREDICTFUN_GRAPHQL_URL", "https://graphql.predict.fun/graphql"
         ),
         predictfun_graphql_is_resolved=_get_env_bool("PREDICTFUN_GRAPHQL_IS_RESOLVED", False),
+        predictfun_graphql_timeout_sec=_get_env_int("PREDICTFUN_GRAPHQL_TIMEOUT_SEC", 10),
+        predictfun_graphql_retry_count=_get_env_int("PREDICTFUN_GRAPHQL_RETRY_COUNT", 2),
+        predictfun_graphql_retry_sleep_sec=_get_env_float("PREDICTFUN_GRAPHQL_RETRY_SLEEP_SEC", 0.7),
         predictfun_timeout_sec=_get_env_int("PREDICTFUN_TIMEOUT_SEC", 10),
         predictfun_api_key=_get_env_optional("PREDICTFUN_API_KEY"),
         predictfun_api_key_header=_get_env_str("PREDICTFUN_API_KEY_HEADER", "x-api-key"),
