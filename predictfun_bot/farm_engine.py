@@ -36,16 +36,23 @@ class FarmEngine:
     def run_once(self, markets: list[Market]) -> None:
         now_ts = int(time.time())
         open_orders = self._fetch_open_orders()
-        token_balances = self._fetch_token_balances()
+        positions, token_balances = self._fetch_positions()
+        positions_by_market = _positions_by_market(positions)
         self._sync_orders(open_orders, now_ts)
+        stop_markets = self._handle_stop_losses(
+            markets, open_orders, positions_by_market, token_balances, now_ts
+        )
         farm_markets = self._select_markets(markets, now_ts)
         self._ensure_market_limit(farm_markets)
         placed = 0
         for market in farm_markets:
+            if market.market_id in stop_markets:
+                continue
             placed += self._ensure_market_orders(
                 market,
                 open_orders,
                 token_balances,
+                positions_by_market,
                 now_ts,
                 self._config.farm_min_spread,
                 self._config.farm_max_spread,
@@ -59,10 +66,13 @@ class FarmEngine:
                 },
             )
             for market in farm_markets:
+                if market.market_id in stop_markets:
+                    continue
                 placed += self._ensure_market_orders(
                     market,
                     open_orders,
                     token_balances,
+                    positions_by_market,
                     now_ts,
                     self._config.farm_relax_min_spread,
                     self._config.farm_relax_max_spread,
@@ -92,7 +102,7 @@ class FarmEngine:
                 mapping[str(order_hash)] = item
         return mapping
 
-    def _fetch_token_balances(self) -> dict[str, int]:
+    def _fetch_positions(self) -> tuple[list[dict], dict[str, int]]:
         try:
             payload = self._client.list_positions()
         except Exception as exc:  # noqa: BLE001
@@ -102,11 +112,111 @@ class FarmEngine:
                     payload = self._client.list_positions()
                 except Exception as refresh_exc:  # noqa: BLE001
                     self._logger.log_error("farm_auth_refresh", str(refresh_exc))
-                    return {}
+                    return [], {}
             else:
                 self._logger.log_error("list_positions", str(exc))
-                return {}
-        return _parse_token_balances(payload)
+                return [], {}
+        positions = _parse_positions(payload)
+        return positions, _parse_token_balances(payload)
+
+    def _handle_stop_losses(
+        self,
+        markets: list[Market],
+        open_orders: dict[str, dict],
+        positions_by_market: dict[str, dict],
+        token_balances: dict[str, int],
+        now_ts: int,
+    ) -> set[str]:
+        if self._config.farm_stop_loss_pct <= 0:
+            return set()
+        markets_by_id = {market.market_id: market for market in markets}
+        triggered: set[str] = set()
+        for market_id, position in positions_by_market.items():
+            entry_price = position.get("entry_price")
+            if entry_price is None:
+                continue
+            market = markets_by_id.get(market_id)
+            if not market or market.yes_bid is None:
+                continue
+            if market.yes_bid > entry_price * (1.0 - self._config.farm_stop_loss_pct):
+                continue
+            triggered.add(market_id)
+            token_id = position.get("token_id") or _pick_yes_token_id(market)
+            if not token_id:
+                self._logger.log_reject(
+                    market_id,
+                    market.title,
+                    "farm_stoploss_no_token",
+                    {},
+                )
+                continue
+            inventory_wei = int(position.get("amount_wei") or 0)
+            if inventory_wei <= 0:
+                continue
+            existing = _find_state_order(self._state.get_farm_orders(), market_id, "sell")
+            if existing and existing.order_id:
+                try:
+                    self._client.remove_orders([existing.order_id])
+                    self._logger.log_info(
+                        "farm_stoploss_cancel",
+                        {"market_id": market_id, "order_id": existing.order_id},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._logger.log_error("farm_cancel", str(exc))
+                    continue
+                self._state.remove_farm_order(market_id, "sell")
+            price = _aggressive_sell_price(market)
+            if price is None:
+                self._logger.log_reject(
+                    market_id,
+                    market.title,
+                    "farm_stoploss_no_price",
+                    {},
+                )
+                continue
+            size_usd = _inventory_usd(inventory_wei, price)
+            if size_usd <= 0:
+                continue
+            expiry_minutes = max(1, self._config.farm_stop_loss_expiry_minutes)
+            try:
+                payload, _, _, order_hash = self._orders.build_limit_order(
+                    side="sell",
+                    token_id=token_id,
+                    price=price,
+                    size_usd=size_usd,
+                    fee_rate_bps=market.fee_rate_bps,
+                    decimal_precision=market.decimal_precision,
+                    is_neg_risk=market.is_neg_risk,
+                    is_yield_bearing=market.is_yield_bearing,
+                    expiry_minutes=expiry_minutes,
+                )
+                response = self._create_order_with_jwt_retry(payload)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.log_error("farm_stoploss", str(exc))
+                continue
+            order_id = _extract_order_id(response)
+            farm_order = FarmOrder(
+                market_id=market_id,
+                side="sell",
+                order_id=order_id,
+                order_hash=order_hash,
+                price=price,
+                quantity_wei=inventory_wei,
+                placed_at_ts=now_ts,
+                status="OPEN",
+            )
+            self._state.set_farm_order(market_id, "sell", farm_order)
+            self._logger.log_info(
+                "farm_stoploss_placed",
+                {
+                    "market_id": market_id,
+                    "price": price,
+                    "entry_price": entry_price,
+                    "size_usd": size_usd,
+                    "expiry_minutes": expiry_minutes,
+                },
+            )
+        return triggered
 
     def _sync_orders(self, open_orders: dict[str, dict], now_ts: int) -> None:
         for farm_order in self._state.list_farm_orders():
@@ -213,6 +323,7 @@ class FarmEngine:
         market: Market,
         open_orders: dict[str, dict],
         token_balances: dict[str, int],
+        positions_by_market: dict[str, dict],
         now_ts: int,
         min_spread: float,
         max_spread: float,
@@ -232,6 +343,8 @@ class FarmEngine:
             price = prices[0] if side == "buy" else prices[1]
             token_id = _pick_yes_token_id(market)
             if not token_id:
+                token_id = positions_by_market.get(market.market_id, {}).get("token_id", "")
+            if not token_id:
                 self._logger.log_reject(market.market_id, market.title, "farm_no_token", {})
                 return placed
             size_usd = self._random_order_usd()
@@ -247,7 +360,9 @@ class FarmEngine:
                     },
                 )
                 continue
-            inventory_wei = token_balances.get(token_id, 0)
+            inventory_wei = positions_by_market.get(market.market_id, {}).get(
+                "amount_wei", token_balances.get(token_id, 0)
+            )
             if side == "buy":
                 if inventory_wei > 0 and not self._config.farm_allow_position_add:
                     self._logger.log_reject(
@@ -311,8 +426,26 @@ class FarmEngine:
                         {"available_wei": available_wei},
                     )
                     continue
-                if inventory_usd < size_usd:
-                    size_usd = round(inventory_usd, 2)
+                size_usd = round(inventory_usd, 2)
+                sell_quantity_wei = self._orders.estimate_quantity_wei(
+                    price,
+                    size_usd,
+                    market.decimal_precision,
+                )
+                if sell_quantity_wei <= 0:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_dust",
+                        {"available_wei": available_wei},
+                    )
+                    continue
+                tail_wei = max(available_wei - sell_quantity_wei, 0)
+                if tail_wei > 0:
+                    self._logger.log_info(
+                        "farm_sell_tail",
+                        {"market_id": market.market_id, "tail_wei": tail_wei},
+                    )
                 required_wei = self._orders.estimate_quantity_wei(
                     price,
                     size_usd,
@@ -642,6 +775,127 @@ def _is_hash_mismatch(exc: Exception) -> bool:
 def _is_invalid_jwt(exc: Exception) -> bool:
     message = str(exc).lower()
     return "invalid jwt" in message or "http 401" in message
+
+
+def _aggressive_sell_price(market: Market) -> float | None:
+    if market.yes_bid is None:
+        return None
+    tick = 1 / (10**market.decimal_precision)
+    price = max(0.0, market.yes_bid - tick)
+    return round(price, market.decimal_precision)
+
+
+def _parse_positions(payload: object) -> list[dict]:
+    data = payload
+    if isinstance(payload, dict):
+        data = payload.get("data")
+    if not isinstance(data, list):
+        return []
+    positions: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        market_id = _extract_market_id(item)
+        token_id = _extract_token_id(item)
+        amount_wei = _extract_position_amount(item)
+        if not market_id or not token_id or amount_wei <= 0:
+            continue
+        entry_price = _extract_entry_price(item, amount_wei)
+        positions.append(
+            {
+                "market_id": market_id,
+                "token_id": token_id,
+                "amount_wei": amount_wei,
+                "entry_price": entry_price,
+            }
+        )
+    return positions
+
+
+def _extract_market_id(item: dict) -> str:
+    market_id = item.get("marketId") or item.get("market_id") or item.get("marketID")
+    if not market_id:
+        market = item.get("market")
+        if isinstance(market, dict):
+            market_id = market.get("id") or market.get("marketId")
+    return str(market_id) if market_id else ""
+
+
+def _extract_position_amount(item: dict) -> int:
+    candidates = (
+        "amount",
+        "tokenAmount",
+        "quantity",
+        "shares",
+        "positionSize",
+        "amountAvailable",
+        "available",
+        "balance",
+    )
+    for key in candidates:
+        if key in item and item[key] is not None:
+            parsed = _parse_wei_amount(item[key])
+            if parsed is not None:
+                return parsed
+    return 0
+
+
+def _extract_entry_price(item: dict, amount_wei: int) -> float | None:
+    candidates = (
+        "avgPrice",
+        "averagePrice",
+        "avgEntryPrice",
+        "entryPrice",
+        "avgPricePerShare",
+        "pricePerShare",
+        "avgFillPrice",
+    )
+    for key in candidates:
+        if key in item and item[key] is not None:
+            return _normalize_price(item[key])
+    cost_basis = None
+    for key in ("costBasis", "totalCost", "costUsd", "notionalUsd"):
+        if key in item and item[key] is not None:
+            cost_basis = _parse_float(item[key])
+            break
+    if cost_basis is None or amount_wei <= 0:
+        return None
+    shares = float(Decimal(amount_wei) / Decimal("1e18"))
+    if shares <= 0:
+        return None
+    return cost_basis / shares
+
+
+def _normalize_price(value: object) -> float | None:
+    raw = _parse_float(value)
+    if raw is None:
+        return None
+    if raw > 1e9:
+        return float(Decimal(str(raw)) / Decimal("1e18"))
+    if raw > 1:
+        return raw / 100.0
+    return raw
+
+
+def _parse_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _positions_by_market(positions: list[dict]) -> dict[str, dict]:
+    mapping: dict[str, dict] = {}
+    for position in positions:
+        market_id = position.get("market_id")
+        if not market_id:
+            continue
+        existing = mapping.get(market_id)
+        if not existing or int(position.get("amount_wei", 0)) > int(existing.get("amount_wei", 0)):
+            mapping[market_id] = position
+    return mapping
 
 
 def _parse_token_balances(payload: object) -> dict[str, int]:

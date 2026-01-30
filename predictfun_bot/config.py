@@ -123,6 +123,8 @@ class Config:
     farm_top_levels: int
     farm_order_expiry_min_minutes: int
     farm_order_expiry_max_minutes: int
+    farm_stop_loss_pct: float
+    farm_stop_loss_expiry_minutes: int
     orderbook_retry_count: int
     orderbook_retry_sleep_sec: float
     markets_cursor_ttl_sec: int
@@ -250,6 +252,8 @@ def load_config() -> Config:
         farm_order_expiry_max_minutes=int(farm_expiry_max)
         if farm_expiry_max is not None
         else _get_env_int("ORDER_EXPIRY_MINUTES", 10),
+        farm_stop_loss_pct=_get_env_float("FARM_STOP_LOSS_PCT", 0.0),
+        farm_stop_loss_expiry_minutes=_get_env_int("FARM_STOP_LOSS_EXPIRY_MINUTES", 2),
         orderbook_retry_count=_get_env_int("ORDERBOOK_RETRY_COUNT", 2),
         orderbook_retry_sleep_sec=_get_env_float("ORDERBOOK_RETRY_SLEEP_SEC", 0.6),
         markets_cursor_ttl_sec=_get_env_int("MARKETS_CURSOR_TTL_SEC", 900),

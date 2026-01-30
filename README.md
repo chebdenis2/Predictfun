@@ -48,6 +48,8 @@ Farm settings (defaults in `.env.example`):
 - `FARM_MAX_INVENTORY_USD`: cap on per-market inventory (USD).
 - `FARM_ALLOW_POSITION_ADD`: allow adding to an existing position (default false).
 - `FARM_ORDER_EXPIRY_MINUTES` / `FARM_ORDER_EXPIRY_MAX_MINUTES`: randomize limit expiry.
+- `FARM_STOP_LOSS_PCT`: stop-loss threshold (e.g. 0.30 = -30%).
+- `FARM_STOP_LOSS_EXPIRY_MINUTES`: stop-loss order expiry (minutes).
 - `FARM_MAX_OPEN_MARKETS`: cap on markets farmed simultaneously.
 - `FARM_AVOID_MINUTES` / `FARM_MAX_VOLATILITY`: avoid high volatility near expiry.
 - `FARM_TOP_LEVELS`: ensure orders stay within top-5 levels.
