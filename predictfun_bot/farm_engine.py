@@ -38,12 +38,15 @@ class FarmEngine:
         open_orders = self._fetch_open_orders()
         positions, token_balances = self._fetch_positions()
         positions_by_market = _positions_by_market(positions)
+        self._log_farm_state(open_orders, positions_by_market, token_balances)
+        self._sync_positions(positions_by_market)
         self._sync_orders(open_orders, now_ts)
         stop_markets = self._handle_stop_losses(
             markets, open_orders, positions_by_market, token_balances, now_ts
         )
         farm_markets = self._select_markets(markets, now_ts)
-        self._ensure_market_limit(farm_markets)
+        farm_markets = self._merge_position_markets(farm_markets, markets, positions_by_market)
+        self._ensure_market_limit(farm_markets, len(positions_by_market))
         placed = 0
         for market in farm_markets:
             if market.market_id in stop_markets:
@@ -78,6 +81,93 @@ class FarmEngine:
                     self._config.farm_relax_max_spread,
                 )
 
+    def _log_farm_state(
+        self,
+        open_orders: dict[str, dict],
+        positions_by_market: dict[str, dict],
+        token_balances: dict[str, int],
+    ) -> None:
+        buy_orders = 0
+        sell_orders = 0
+        for item in open_orders.values():
+            side = _extract_order_side(item)
+            if side == "buy":
+                buy_orders += 1
+            elif side == "sell":
+                sell_orders += 1
+        self._logger.log_info(
+            "farm_state",
+            {
+                "open_orders": len(open_orders),
+                "open_orders_buy": buy_orders,
+                "open_orders_sell": sell_orders,
+                "positions": len(positions_by_market),
+                "token_balances": len(token_balances),
+            },
+        )
+
+    def _merge_position_markets(
+        self,
+        farm_markets: list[Market],
+        markets: list[Market],
+        positions_by_market: dict[str, dict],
+    ) -> list[Market]:
+        market_by_id = {market.market_id: market for market in markets}
+        position_markets: list[Market] = []
+        for market_id in positions_by_market:
+            market = market_by_id.get(market_id)
+            if market:
+                position_markets.append(market)
+        market_ids = {market.market_id for market in position_markets}
+        merged = position_markets[:]
+        for market in farm_markets:
+            if market.market_id in market_ids:
+                continue
+            merged.append(market)
+        if position_markets:
+            self._logger.log_info(
+                "farm_manage_positions",
+                {"markets": len(position_markets), "total": len(merged)},
+            )
+        return merged
+
+    def _sync_positions(self, positions_by_market: dict[str, dict]) -> None:
+        previous = self._state.get_farm_positions()
+        current_ids = set(positions_by_market.keys())
+        previous_ids = set(previous.keys())
+        for market_id in current_ids - previous_ids:
+            position = positions_by_market[market_id]
+            self._logger.log_info(
+                "farm_position_opened",
+                {
+                    "market_id": market_id,
+                    "amount_wei": position.get("amount_wei"),
+                    "entry_price": position.get("entry_price"),
+                },
+            )
+        for market_id in previous_ids - current_ids:
+            self._logger.log_info(
+                "farm_position_closed",
+                {
+                    "market_id": market_id,
+                    "prev_amount_wei": previous.get(market_id, {}).get("amount_wei"),
+                },
+            )
+        for market_id in current_ids & previous_ids:
+            prev_amount = int(previous.get(market_id, {}).get("amount_wei", 0))
+            curr_amount = int(positions_by_market[market_id].get("amount_wei", 0))
+            if curr_amount != prev_amount:
+                self._logger.log_info(
+                    "farm_position_updated",
+                    {
+                        "market_id": market_id,
+                        "prev_amount_wei": prev_amount,
+                        "amount_wei": curr_amount,
+                    },
+                )
+        self._state.set_farm_positions(
+            {mid: positions_by_market[mid] for mid in positions_by_market}
+        )
     def _fetch_open_orders(self) -> dict[str, dict]:
         try:
             orders, _ = self._client.list_orders(status="OPEN", first=100)
@@ -264,7 +354,7 @@ class FarmEngine:
         filtered: list[Market] = []
         target_volume = (self._config.farm_min_volume_usd + self._config.farm_max_volume_usd) / 2
         for market in markets:
-            if market.volume_usd < self._config.farm_min_volume_usd:
+            if self._config.farm_min_volume_usd > 0 and market.volume_usd < self._config.farm_min_volume_usd:
                 self._logger.log_reject(
                     market.market_id,
                     market.title,
@@ -272,7 +362,7 @@ class FarmEngine:
                     {"volume_usd": market.volume_usd},
                 )
                 continue
-            if market.volume_usd > self._config.farm_max_volume_usd:
+            if self._config.farm_max_volume_usd > 0 and market.volume_usd > self._config.farm_max_volume_usd:
                 self._logger.log_reject(
                     market.market_id,
                     market.title,
@@ -280,6 +370,31 @@ class FarmEngine:
                     {"volume_usd": market.volume_usd},
                 )
                 continue
+            if self._config.farm_max_open_interest_usd > 0:
+                if market.open_interest_usd <= 0:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_no_open_interest",
+                        {},
+                    )
+                    continue
+                if market.open_interest_usd < self._config.farm_min_open_interest_usd:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_low_open_interest",
+                        {"open_interest_usd": market.open_interest_usd},
+                    )
+                    continue
+                if market.open_interest_usd > self._config.farm_max_open_interest_usd:
+                    self._logger.log_reject(
+                        market.market_id,
+                        market.title,
+                        "farm_high_open_interest",
+                        {"open_interest_usd": market.open_interest_usd},
+                    )
+                    continue
             if len(market.yes_bids) < self._config.farm_top_levels or len(
                 market.yes_asks
             ) < self._config.farm_top_levels:
@@ -312,11 +427,12 @@ class FarmEngine:
         filtered.sort(key=lambda m: abs(m.volume_usd - target_volume))
         return filtered
 
-    def _ensure_market_limit(self, markets: list[Market]) -> None:
+    def _ensure_market_limit(self, markets: list[Market], min_keep: int = 0) -> None:
         max_markets = self._config.farm_max_open_markets
         if len(markets) <= max_markets:
             return
-        del markets[max_markets:]
+        max_keep = max(max_markets, min_keep)
+        del markets[max_keep:]
 
     def _ensure_market_orders(
         self,
@@ -896,6 +1012,22 @@ def _positions_by_market(positions: list[dict]) -> dict[str, dict]:
         if not existing or int(position.get("amount_wei", 0)) > int(existing.get("amount_wei", 0)):
             mapping[market_id] = position
     return mapping
+
+
+def _extract_order_side(item: dict) -> str | None:
+    order = item.get("order") if isinstance(item, dict) else None
+    if isinstance(order, dict):
+        side = order.get("side")
+    else:
+        side = item.get("side") if isinstance(item, dict) else None
+    if side is None:
+        return None
+    side_str = str(side).lower()
+    if side_str in {"buy", "0"}:
+        return "buy"
+    if side_str in {"sell", "1"}:
+        return "sell"
+    return side_str
 
 
 def _parse_token_balances(payload: object) -> dict[str, int]:

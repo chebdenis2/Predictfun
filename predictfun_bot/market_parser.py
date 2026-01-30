@@ -32,6 +32,7 @@ def build_market_base(item: dict) -> Market:
     is_yield_bearing = bool(item.get("isYieldBearing"))
     decimal_precision = int(item.get("decimalPrecision") or 2)
     volume_usd = _parse_volume(item)
+    open_interest_usd = _parse_open_interest(item)
     return Market(
         market_id=market_id,
         symbol=symbol,
@@ -45,6 +46,7 @@ def build_market_base(item: dict) -> Market:
         yes_asks=(),
         yes_bids=(),
         volume_usd=volume_usd,
+        open_interest_usd=open_interest_usd,
         expiry_ts=expiry_ts,
         resolution_minutes=resolution_minutes,
         kind=kind,
@@ -83,13 +85,20 @@ def apply_stats(market: Market, stats: dict | None) -> Market:
     volume = stats.get("volume24hUsd")
     if volume is None:
         volume = stats.get("volumeTotalUsd")
-    if volume is None:
-        volume = stats.get("totalLiquidityUsd")
     try:
         volume_usd = float(volume) if volume is not None else market.volume_usd
     except (TypeError, ValueError):
         volume_usd = market.volume_usd
-    return replace(market, volume_usd=volume_usd)
+    open_interest = stats.get("totalLiquidityUsd")
+    if open_interest is None:
+        open_interest = stats.get("openInterestUsd")
+    try:
+        open_interest_usd = (
+            float(open_interest) if open_interest is not None else market.open_interest_usd
+        )
+    except (TypeError, ValueError):
+        open_interest_usd = market.open_interest_usd
+    return replace(market, volume_usd=volume_usd, open_interest_usd=open_interest_usd)
 
 
 def _parse_outcomes(raw: object) -> tuple[Outcome, ...]:
@@ -109,13 +118,31 @@ def _parse_outcomes(raw: object) -> tuple[Outcome, ...]:
 def _parse_volume(item: dict) -> float:
     stats = item.get("statistics")
     if isinstance(stats, dict):
-        for key in ("volume24hUsd", "volumeTotalUsd", "totalLiquidityUsd"):
+        for key in ("volume24hUsd", "volumeTotalUsd"):
             if key in stats and stats[key] is not None:
                 try:
                     return float(stats[key])
                 except (TypeError, ValueError):
                     continue
     for key in ("volume24hUsd", "volumeTotalUsd", "totalLiquidityUsd", "volume_usd", "volumeUsd"):
+        if key in item and item[key] is not None:
+            try:
+                return float(item[key])
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
+
+def _parse_open_interest(item: dict) -> float:
+    stats = item.get("statistics")
+    if isinstance(stats, dict):
+        for key in ("totalLiquidityUsd", "openInterestUsd", "openInterest"):
+            if key in stats and stats[key] is not None:
+                try:
+                    return float(stats[key])
+                except (TypeError, ValueError):
+                    continue
+    for key in ("totalLiquidityUsd", "openInterestUsd", "openInterest", "open_interest_usd"):
         if key in item and item[key] is not None:
             try:
                 return float(item[key])

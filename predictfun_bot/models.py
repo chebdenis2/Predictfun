@@ -24,6 +24,7 @@ class Market:
     yes_asks: tuple[tuple[float, float], ...]
     yes_bids: tuple[tuple[float, float], ...]
     volume_usd: float
+    open_interest_usd: float
     expiry_ts: int
     resolution_minutes: int
     kind: str

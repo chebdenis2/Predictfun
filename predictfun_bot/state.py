@@ -18,6 +18,7 @@ class StateStore:
             "farm_orders": {},
             "market_history": {},
             "markets_cursors": {},
+            "farm_positions": {},
         }
         self._load()
 
@@ -36,6 +37,7 @@ class StateStore:
                 "farm_orders": {},
                 "market_history": {},
                 "markets_cursors": {},
+                "farm_positions": {},
             }
 
     def _save(self) -> None:
@@ -185,4 +187,11 @@ class StateStore:
             "cursor": cursor,
             "ts": int(time.time()),
         }
+        self._save()
+
+    def get_farm_positions(self) -> dict:
+        return dict(self._state.get("farm_positions", {}))
+
+    def set_farm_positions(self, positions: dict) -> None:
+        self._state["farm_positions"] = positions
         self._save()

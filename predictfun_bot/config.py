@@ -114,6 +114,8 @@ class Config:
     farm_min_hold_sec: int
     farm_min_volume_usd: float
     farm_max_volume_usd: float
+    farm_min_open_interest_usd: float
+    farm_max_open_interest_usd: float
     farm_order_usd: float
     farm_order_usd_min: float
     farm_order_usd_max: float
@@ -230,8 +232,10 @@ def load_config() -> Config:
         farm_min_spread=_get_env_float("FARM_MIN_SPREAD", 0.01),
         farm_max_spread=_get_env_float("FARM_MAX_SPREAD", 0.02),
         farm_min_hold_sec=_get_env_int("FARM_MIN_HOLD_SEC", 300),
-        farm_min_volume_usd=_get_env_float("FARM_MIN_VOLUME_USD", 50000.0),
-        farm_max_volume_usd=_get_env_float("FARM_MAX_VOLUME_USD", 150000.0),
+        farm_min_volume_usd=_get_env_float("FARM_MIN_VOLUME_USD", 0.0),
+        farm_max_volume_usd=_get_env_float("FARM_MAX_VOLUME_USD", 0.0),
+        farm_min_open_interest_usd=_get_env_float("FARM_MIN_OPEN_INTEREST_USD", 0.0),
+        farm_max_open_interest_usd=_get_env_float("FARM_MAX_OPEN_INTEREST_USD", 10000.0),
         farm_order_usd=farm_order_usd,
         farm_order_usd_min=float(farm_order_usd_min)
         if farm_order_usd_min is not None
